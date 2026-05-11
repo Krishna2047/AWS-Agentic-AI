@@ -5,7 +5,7 @@ Replaces the previous in-process agent manager. Responsibilities:
   - Invoke AgentCore Runtime agents (streaming SSE and non-streaming fallback)
   - Store and query AgentCore Memory (Long-Term / Short-Term)
   - Invoke MCP tools on Runtime endpoints
-  - Invoke Gateway tools (external integrations such as Jira)
+  - Invoke Gateway tools (external integrations such as YouTrack)
 
 Singleton lifecycle:
   get_agentcore_client(region) returns a process-wide singleton per region,
@@ -62,11 +62,11 @@ class AgentCoreClient:
     def __init__(self, region: str = "us-east-1"):
         self.region = region
         
-        # read_timeout=300s (5min): Multi-specialist queries (health check, etc.) call 3+ agents
-        # sequentially. Each cold-starts at 60-120s. 3×120s = 360s worst case, so 300s covers
-        # most warm + first-cold-start scenarios without hanging forever.
+        # read_timeout=600s (10min): Multi-specialist queries (health check, etc.) call 3+ agents
+        # sequentially. Each cold-starts at 60-120s. 3×120s = 360s worst case + gateway delay.
+        # 600s (10 minutes) provides safe buffer for all scenarios including cold-start chains.
         client_config = Config(
-            read_timeout=300,      # 5 minutes for multi-specialist cold-start chains
+            read_timeout=600,      # 10 minutes for multi-specialist cold-start chains
             connect_timeout=10,    # 10 seconds for connection
             retries={'max_attempts': 1}  # Don't retry long agent calls
         )
@@ -386,7 +386,7 @@ class AgentCoreClient:
         """
         Invoke a tool on AgentCore Gateway target (non-blocking).
         
-        Use this for external integrations like Jira that require OAuth.
+        Use this for external integrations like YouTrack that require OAuth.
         Gateway handles authentication and protocol translation.
         """
         try:
@@ -396,7 +396,7 @@ class AgentCoreClient:
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
-                lambda: self.runtime_client.invoke_mcp_tool(
+                lambda: self.runtime_client.invoke_gateway(
                     gatewayUrl=gateway_url,
                     targetName=target_name,
                     tool=tool,
