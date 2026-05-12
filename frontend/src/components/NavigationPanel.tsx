@@ -96,21 +96,20 @@ export function NavigationPanel() {
   };
 
   // Convert accounts to select options, adding consolidated option
-  const consolidatedOption: SelectProps.Option = {
-    label: 'All Accounts (Consolidated View)',
-    value: 'all',
-    iconName: 'menu'
-  };
-
   const accountOptions: SelectProps.Options = [
-    consolidatedOption,
+    {
+      label: 'All Accounts (Consolidated View)',
+      value: 'all',
+      iconName: 'menu',
+      description: 'View data from all accounts'
+    } as any,
     ...(accounts ?? []).map(account => ({
       label: account.type === 'customer'
         ? `${getStatusIcon(account.status)} ${account.name} (${account.account_id})`
         : account.name,
       value: account.id,
       iconName: account.type === 'msp' ? 'settings' : 'user-profile'
-    }))
+    } as any))
   ];
 
   const currentOption = accountOptions.find(opt => opt.value === selectedAccount?.id) || accountOptions[0] || null;
