@@ -808,6 +808,20 @@ class APIClient {
     });
     return response.data;
   }
+
+  async getAvailableTags(tagKeys?: string): Promise<any> {
+    const response = await this.client.get('/tags/available', {
+      params: {
+        tag_keys: tagKeys || undefined
+      }
+    });
+    return response.data;
+  }
+
+  async getTagKeys(): Promise<any> {
+    const response = await this.client.get('/tags/keys');
+    return response.data;
+  }
 }
 
 // Export singleton instance

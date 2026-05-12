@@ -2162,6 +2162,101 @@ async def export_dashboard_costs(
     )
 
 
+@router.get("/tags/available")
+async def get_available_tags(
+    tag_keys: Optional[str] = Query(None),
+    current_user: Dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    GET /tags/available — fetch active tags from AWS resources.
+
+    Returns tags that are actually in use on resources, organized by tag key.
+    Only returns tags with active resources.
+
+    Query params:
+    - tag_keys: Comma-separated list of tag keys to fetch (optional)
+                If not provided, fetches common cost allocation tags
+
+    Example:
+      GET /tags/available
+      GET /tags/available?tag_keys=Environment,Project,Owner
+
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "Environment": ["Production", "Staging", "Development"],
+            "Project": ["ProjectA", "ProjectB", "ProjectC"],
+            "Owner": ["TeamName", "Engineering", "DevOps"]
+        },
+        "timestamp": "2026-05-12T10:30:00Z"
+    }
+    """
+    from app.services.tags_service import get_tags_service
+
+    try:
+        tags_service = get_tags_service()
+
+        # Parse requested tag keys
+        requested_keys = None
+        if tag_keys:
+            requested_keys = [key.strip() for key in tag_keys.split(',')]
+
+        # Fetch active tags
+        active_tags = tags_service.get_active_tags(tag_keys=requested_keys)
+
+        return {
+            "success": True,
+            "data": active_tags,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching available tags: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "data": {},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@router.get("/tags/keys")
+async def get_tag_keys(current_user: Dict = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    GET /tags/keys — fetch list of common tag keys in the account.
+
+    Returns frequently used tag keys (filtered to exclude system tags).
+
+    Returns:
+    {
+        "success": true,
+        "data": ["Environment", "Project", "Owner", "CostCenter", "Team"],
+        "timestamp": "2026-05-12T10:30:00Z"
+    }
+    """
+    from app.services.tags_service import get_tags_service
+
+    try:
+        tags_service = get_tags_service()
+        tag_keys = tags_service.get_common_tag_keys()
+
+        return {
+            "success": True,
+            "data": tag_keys,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching tag keys: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "data": [],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
 @router.get("/dashboard/costs/export/latest")
 async def download_latest_scheduled_workbook(current_user: Dict = Depends(get_current_user)):
     """

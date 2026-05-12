@@ -12,7 +12,6 @@ import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import TextFilter from '@cloudscape-design/components/text-filter';
 import Alert from '@cloudscape-design/components/alert';
 import FormField from '@cloudscape-design/components/form-field';
-import Input from '@cloudscape-design/components/input';
 import Select from '@cloudscape-design/components/select';
 import DatePicker from '@cloudscape-design/components/date-picker';
 import { useDashboardStore } from '../store/dashboardStore';
@@ -24,7 +23,7 @@ import { Breadcrumbs } from '../components/Breadcrumbs';
 import { Pagination } from '../components/Pagination';
 import { SkeletonKPIs, SkeletonChart, SkeletonTable } from '../components/SkeletonLoader';
 import { DashboardFilterSchema, validateInput } from '../utils/validation';
-import type { DashboardQueryFilters } from '../services/api/apiClient';
+import { apiClient, type DashboardQueryFilters } from '../services/api/apiClient';
 
 export default function DashboardPage() {
   const { data, isLoading, isExporting, fetchCosts, exportCosts, error } = useDashboardStore();
@@ -53,6 +52,14 @@ export default function DashboardPage() {
   });
   const [appliedCreditsFilter, setAppliedCreditsFilter] = useState('all');
 
+  // Tag dropdowns
+  const [availableTags, setAvailableTags] = useState<Record<string, { label: string; value: string }[]>>({
+    projectName: [],
+    environment: [],
+    ownership: []
+  });
+  const [loadingTags, setLoadingTags] = useState(true);
+
   const selectedScopeAccount = scope === 'all' ? 'all' : (selectedAccount?.id || 'default');
   const normalizedFilters = useMemo<DashboardQueryFilters>(() => ({
     projectName: dashboardFilters.projectName?.trim() || undefined,
@@ -63,6 +70,46 @@ export default function DashboardPage() {
     endDate: dashboardFilters.endDate || undefined,
   }), [dashboardFilters]);
   
+  // Fetch available tags on component mount
+  useEffect(() => {
+    const fetchAvailableTags = async () => {
+      try {
+        setLoadingTags(true);
+        const response = await apiClient.getAvailableTags('Project Name tag,Environment tag,Ownership tag');
+
+        if (response.success && response.data) {
+          const tags = response.data;
+
+          // Transform tags into Cloudscape Select format
+          const projectTags = (tags['Project Name tag'] || []).map((tag: string) => ({
+            label: tag,
+            value: tag
+          }));
+          const environmentTags = (tags['Environment tag'] || []).map((tag: string) => ({
+            label: tag,
+            value: tag
+          }));
+          const ownershipTags = (tags['Ownership tag'] || []).map((tag: string) => ({
+            label: tag,
+            value: tag
+          }));
+
+          setAvailableTags({
+            projectName: projectTags,
+            environment: environmentTags,
+            ownership: ownershipTags
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching tags:', error);
+      } finally {
+        setLoadingTags(false);
+      }
+    };
+
+    fetchAvailableTags();
+  }, []);
+
   // Refetch when the scope or selected account changes
   useEffect(() => {
     fetchCosts(selectedScopeAccount, periodMonths, appliedFilters);
@@ -239,24 +286,69 @@ export default function DashboardPage() {
       <Container header={<Header variant="h2">Cost Filters</Header>}>
         <Grid gridDefinition={[{ colspan: { default: 12, m: 3 } }, { colspan: { default: 12, m: 3 } }, { colspan: { default: 12, m: 3 } }, { colspan: { default: 12, m: 3 } }]}>
           <FormField label="Project Name tag">
-            <Input
-              value={dashboardFilters.projectName || ''}
-              placeholder="e.g., MyProject (optional)"
-              onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, projectName: detail.value }))}
+            <Select
+              selectedOption={
+                dashboardFilters.projectName
+                  ? { label: dashboardFilters.projectName, value: dashboardFilters.projectName }
+                  : null
+              }
+              onChange={({ detail }) =>
+                setDashboardFilters((prev) => ({
+                  ...prev,
+                  projectName: detail.selectedOption?.value || ''
+                }))
+              }
+              options={[
+                { label: 'All Projects', value: '' },
+                ...availableTags.projectName
+              ]}
+              disabled={loadingTags}
+              placeholder={loadingTags ? 'Loading projects...' : 'Select project'}
+              filteringType="auto"
             />
           </FormField>
           <FormField label="Environment tag">
-            <Input
-              value={dashboardFilters.environment || ''}
-              placeholder="Production"
-              onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, environment: detail.value }))}
+            <Select
+              selectedOption={
+                dashboardFilters.environment
+                  ? { label: dashboardFilters.environment, value: dashboardFilters.environment }
+                  : null
+              }
+              onChange={({ detail }) =>
+                setDashboardFilters((prev) => ({
+                  ...prev,
+                  environment: detail.selectedOption?.value || ''
+                }))
+              }
+              options={[
+                { label: 'All Environments', value: '' },
+                ...availableTags.environment
+              ]}
+              disabled={loadingTags}
+              placeholder={loadingTags ? 'Loading environments...' : 'Select environment'}
+              filteringType="auto"
             />
           </FormField>
           <FormField label="Ownership tag">
-            <Input
-              value={dashboardFilters.ownership || ''}
-              placeholder="e.g., TeamName (optional)"
-              onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, ownership: detail.value }))}
+            <Select
+              selectedOption={
+                dashboardFilters.ownership
+                  ? { label: dashboardFilters.ownership, value: dashboardFilters.ownership }
+                  : null
+              }
+              onChange={({ detail }) =>
+                setDashboardFilters((prev) => ({
+                  ...prev,
+                  ownership: detail.selectedOption?.value || ''
+                }))
+              }
+              options={[
+                { label: 'All Owners', value: '' },
+                ...availableTags.ownership
+              ]}
+              disabled={loadingTags}
+              placeholder={loadingTags ? 'Loading owners...' : 'Select owner'}
+              filteringType="auto"
             />
           </FormField>
           <FormField label="Type">
