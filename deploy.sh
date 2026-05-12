@@ -49,10 +49,9 @@ else
   echo "Required variables:"
   echo "  - AWS_REGION"
   echo "  - BEDROCK_MODEL_ID"
-  echo "  - JIRA_DOMAIN"
-  echo "  - JIRA_EMAIL"
-  echo "  - JIRA_API_TOKEN"
-  echo "  - JIRA_PROJECT_KEY"
+  echo "  - YOUTRACK_URL"
+  echo "  - YOUTRACK_TOKEN"
+  echo "  - YOUTRACK_PROJECT_ID"
   exit 1
 fi
 
@@ -71,7 +70,7 @@ echo "Logging to $LOG_FILE"
 
 # Validate required environment variables
 echo "Validating environment variables..."
-REQUIRED_VARS=("JIRA_DOMAIN" "JIRA_EMAIL" "JIRA_API_TOKEN" "JIRA_PROJECT_KEY" "MODEL")
+REQUIRED_VARS=("YOUTRACK_URL" "YOUTRACK_TOKEN" "YOUTRACK_PROJECT_ID" "MODEL")
 MISSING_VARS=()
 
 for var in "${REQUIRED_VARS[@]}"; do
@@ -91,8 +90,8 @@ if [ ${#MISSING_VARS[@]} -gt 0 ]; then
 fi
 
 echo "✓ All required variables configured"
-echo "  Jira Domain: $JIRA_DOMAIN"
-echo "  Jira Email: $JIRA_EMAIL"
+echo "  YouTrack URL: $YOUTRACK_URL"
+  echo "  YouTrack Project ID: $YOUTRACK_PROJECT_ID"
 echo "  Model: $MODEL"
 echo ""
 
@@ -939,276 +938,148 @@ if [ -n "$GATEWAY_ID" ] && [ "$GATEWAY_ID" != "None" ]; then
 
   # --- Jira Integration via API Key + Custom OpenAPI spec ---
   # Uses Basic auth (email:api_token) against the Jira site URL directly.
-  # No OAuth app needed — just JIRA_EMAIL, JIRA_API_TOKEN, JIRA_DOMAIN from .env.
-  echo ""
-  echo "Setting up Jira integration..."
+  # YouTrack permanent token from .env.
 
-  JIRA_API_KEY_NAME="jira-api-key"
-  JIRA_BASIC_TOKEN=$(echo -n "${JIRA_EMAIL}:${JIRA_API_TOKEN}" | base64)
+  YOUTRACK_API_KEY_NAME="youtrack-api-key"
+  YOUTRACK_TOKEN=$YOUTRACK_TOKEN
 
   # Create or recreate API key credential provider (resilient to eventual consistency)
-  JIRA_API_KEY_ARN=$(aws bedrock-agentcore-control get-api-key-credential-provider \
-    --name "$JIRA_API_KEY_NAME" --region $REGION \
+  YOUTRACK_API_KEY_ARN=$(aws bedrock-agentcore-control get-api-key-credential-provider \
+    --name "$YOUTRACK_API_KEY_NAME" --region $REGION \
     --query 'credentialProviderArn' --output text 2>/dev/null || echo "")
 
-  if [ -z "$JIRA_API_KEY_ARN" ] || [ "$JIRA_API_KEY_ARN" = "None" ]; then
+  if [ -z "$YOUTRACK_API_KEY_ARN" ] || [ "$YOUTRACK_API_KEY_ARN" = "None" ]; then
     echo "  Creating new API key credential provider..."
-    JIRA_API_KEY_ARN=$(aws bedrock-agentcore-control create-api-key-credential-provider \
-      --name "$JIRA_API_KEY_NAME" --api-key "$JIRA_BASIC_TOKEN" \
+    YOUTRACK_API_KEY_ARN=$(aws bedrock-agentcore-control create-api-key-credential-provider \
+      --name "$YOUTRACK_API_KEY_NAME" --api-key "$YOUTRACK_TOKEN" \
       --region $REGION --query 'credentialProviderArn' --output text 2>&1) || {
         echo -e "${YELLOW}  ⚠️  API key creation failed (may already exist), retrying...${NC}"
         sleep 5
-        JIRA_API_KEY_ARN=$(aws bedrock-agentcore-control get-api-key-credential-provider \
-          --name "$JIRA_API_KEY_NAME" --region $REGION \
-          --query 'credentialProviderArn' --output text 2>/dev/null || echo "")
+        YOUTRACK_API_KEY_ARN=$(aws bedrock-agentcore-control get-api-key-credential-provider \
+          --name "$YOUTRACK_API_KEY_NAME" --region $REGION \
+          --query 'credentialProviderArn' --output text 2>&1) || {
+            echo -e "${RED}Error: Failed to create/get API key credential provider${NC}"
+            exit 1
+          }
       }
-    echo "  ✓ API key credential provider created"
+    echo "  ✓ API key credential provider created: $YOUTRACK_API_KEY_ARN"
   else
-    echo "  API key provider exists (ARN: $JIRA_API_KEY_ARN), recreating to pick up token changes..."
-    # Delete with error suppression (may take time for eventual consistency)
+    echo "  API key provider exists (ARN: $YOUTRACK_API_KEY_ARN), recreating to pick up token changes..."
     aws bedrock-agentcore-control delete-api-key-credential-provider \
-      --name "$JIRA_API_KEY_NAME" --region $REGION >/dev/null 2>&1 || true
-    echo "  Waiting for deletion to propagate..."
-    sleep 8
-    # Create with retry
-    for attempt in 1 2 3; do
-      JIRA_API_KEY_ARN=$(aws bedrock-agentcore-control create-api-key-credential-provider \
-        --name "$JIRA_API_KEY_NAME" --api-key "$JIRA_BASIC_TOKEN" \
-        --region $REGION --query 'credentialProviderArn' --output text 2>/dev/null) && break
-      echo "    Attempt $attempt failed, retrying in 5s..."
-      sleep 5
-    done
-    if [ -z "$JIRA_API_KEY_ARN" ] || [ "$JIRA_API_KEY_ARN" = "None" ]; then
-      echo -e "${YELLOW}  ⚠️  Could not recreate API key provider, using existing${NC}"
-      JIRA_API_KEY_ARN=$(aws bedrock-agentcore-control get-api-key-credential-provider \
-        --name "$JIRA_API_KEY_NAME" --region $REGION \
-        --query 'credentialProviderArn' --output text 2>/dev/null || echo "")
-    else
-      echo "  ✓ API key credential provider updated"
-    fi
+      --name "$YOUTRACK_API_KEY_NAME" --region $REGION >/dev/null 2>&1 || true
+    sleep 5
+    YOUTRACK_API_KEY_ARN=$(aws bedrock-agentcore-control create-api-key-credential-provider \
+      --name "$YOUTRACK_API_KEY_NAME" --api-key "$YOUTRACK_TOKEN" \
+      --region $REGION --query 'credentialProviderArn' --output text 2>&1) || {
+        echo -e "${YELLOW}  ⚠️  Recreate failed, using existing: $YOUTRACK_API_KEY_ARN${NC}"
+      }
   fi
 
-  if [ -z "$JIRA_API_KEY_ARN" ] || [ "$JIRA_API_KEY_ARN" = "None" ]; then
-    echo -e "${YELLOW}  ⚠️  Jira API key provider not available — skipping Jira gateway target${NC}"
+  if [ -z "$YOUTRACK_API_KEY_ARN" ] || [ "$YOUTRACK_API_KEY_ARN" = "None" ]; then
+    echo -e "${RED}Error: No valid API key credential provider ARN${NC}"
+    exit 1
   fi
 
-  # Strip trailing slash from JIRA_DOMAIN
-  JIRA_DOMAIN="${JIRA_DOMAIN%/}"
+  # Strip trailing slash from YOUTRACK_URL
+  YOUTRACK_BASE_URL="${YOUTRACK_URL%/}"
 
-  # Generate OpenAPI spec at runtime with jq (avoids heredoc encoding issues)
-  # Write to temp file, then use working jq -c | jq -Rs encoding
-  echo "  Generating Jira OpenAPI spec with domain: $JIRA_DOMAIN"
-  
-  jq -n --arg domain "$JIRA_DOMAIN" '{
-    "openapi": "3.0.1",
-    "info": {"title": "Jira REST API", "version": "3"},
-    "servers": [{"url": $domain}],
-    "paths": {
-      "/rest/api/3/issue": {
-        "post": {
-          "operationId": "createIssue",
-          "summary": "Create a Jira issue",
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["fields"],
-                  "properties": {
-                    "fields": {
-                      "type": "object",
-                      "required": ["project", "summary", "issuetype"],
-                      "properties": {
-                        "project": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]},
-                        "summary": {"type": "string"},
-                        "issuetype": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
-                        "description": {
-                          "type": "object",
-                          "required": ["type", "version", "content"],
-                          "properties": {
-                            "type": {"type": "string", "enum": ["doc"]},
-                            "version": {"type": "integer", "enum": [1]},
-                            "content": {"type": "array", "items": {"type": "object"}}
-                          }
-                        },
-                        "priority": {"type": "object", "properties": {"name": {"type": "string"}}},
-                        "labels": {"type": "array", "items": {"type": "string"}},
-                        "assignee": {"type": "object", "properties": {"accountId": {"type": "string"}}}
-                      }
-                    }
-                  }
+  echo "  Generating YouTrack OpenAPI spec with URL: $YOUTRACK_BASE_URL"
+
+  # FIXED: Use cat heredoc instead of multi-line jq to avoid quoting issues with special characters
+  cat > /tmp/youtrack-openapi.json << 'SPEC_EOF'
+{
+  "openapi": "3.0.1",
+  "info": {"title": "YouTrack REST API", "version": "2023.3"},
+  "servers": [{"url": "PLACEHOLDER_URL"}],
+  "paths": {
+    "/api/issues": {
+      "post": {
+        "operationId": "createIssue",
+        "summary": "Create a YouTrack issue",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["project", "summary"],
+                "properties": {
+                  "project": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+                  "summary": {"type": "string"},
+                  "description": {"type": "string"}
                 }
               }
             }
-          },
-          "responses": {"201": {"description": "Issue created"}}
-        }
-      },
-      "/rest/api/3/issue/{issueIdOrKey}": {
-        "get": {
-          "operationId": "getIssue",
-          "summary": "Get issue details",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "responses": {"200": {"description": "Issue details"}}
+          }
         },
-        "put": {
-          "operationId": "updateIssue",
-          "summary": "Update issue",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "requestBody": {
-            "required": true,
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"fields": {"type": "object"}}}}}
-          },
-          "responses": {"204": {"description": "Updated"}}
+        "responses": {"201": {"description": "Issue created"}}
+      }
+    },
+    "/api/issues/{id}": {
+      "get": {
+        "operationId": "getIssue",
+        "summary": "Get issue details",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Issue details"}}
+      },
+      "put": {
+        "operationId": "updateIssue",
+        "summary": "Update issue",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"summary": {"type": "string"}}}}}
         },
-        "delete": {
-          "operationId": "deleteIssue",
-          "summary": "Delete issue",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "responses": {"204": {"description": "Deleted"}}
-        }
-      },
-      "/rest/api/3/issue/{issueIdOrKey}/assignee": {
-        "put": {
-          "operationId": "assignIssue",
-          "summary": "Assign issue to user",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "requestBody": {
-            "required": true,
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"accountId": {"type": "string"}}}}}
-          },
-          "responses": {"204": {"description": "Assigned"}}
-        }
-      },
-      "/rest/api/3/issue/{issueIdOrKey}/comment": {
-        "get": {
-          "operationId": "getComments",
-          "summary": "Get all comments for an issue",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "responses": {"200": {"description": "Comments list"}}
-        },
-        "post": {
-          "operationId": "addComment",
-          "summary": "Add comment",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["body"],
-                  "properties": {
-                    "body": {
-                      "type": "object",
-                      "required": ["type", "version", "content"],
-                      "properties": {
-                        "type": {"type": "string", "enum": ["doc"]},
-                        "version": {"type": "integer", "enum": [1]},
-                        "content": {"type": "array", "items": {"type": "object"}}
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "responses": {"201": {"description": "Comment added"}}
-        }
-      },
-      "/rest/api/3/issue/{issueIdOrKey}/transitions": {
-        "get": {
-          "operationId": "getTransitions",
-          "summary": "Get available transitions for an issue",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "responses": {"200": {"description": "Available transitions"}}
-        },
-        "post": {
-          "operationId": "transitionIssue",
-          "summary": "Transition issue",
-          "parameters": [{"name": "issueIdOrKey", "in": "path", "required": true, "schema": {"type": "string"}}],
-          "requestBody": {
-            "required": true,
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"transition": {"type": "object", "properties": {"id": {"type": "string"}}}}}}}
-          },
-          "responses": {"204": {"description": "Transitioned"}}
-        }
-      },
-      "/rest/api/3/user/search": {
-        "get": {
-          "operationId": "findUsers",
-          "summary": "Find users by query",
-          "parameters": [
-            {"name": "query", "in": "query", "required": true, "schema": {"type": "string"}},
-            {"name": "maxResults", "in": "query", "schema": {"type": "integer", "default": 50}}
-          ],
-          "responses": {"200": {"description": "Users list"}}
-        }
-      },
-      "/rest/api/3/search/jql": {
-        "get": {
-          "operationId": "SearchIssues",
-          "summary": "Search issues using JQL",
-          "parameters": [
-            {"name": "jql", "in": "query", "schema": {"type": "string"}},
-            {"name": "maxResults", "in": "query", "schema": {"type": "integer", "default": 10}},
-            {"name": "fields", "in": "query", "schema": {"type": "string"}}
-          ],
-          "responses": {"200": {"description": "Search results"}}
-        }
-      },
-      "/rest/api/3/issueLink": {
-        "post": {
-          "operationId": "createIssueLink",
-          "summary": "Create link between issues",
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["type", "inwardIssue", "outwardIssue"],
-                  "properties": {
-                    "type": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
-                    "inwardIssue": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]},
-                    "outwardIssue": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}
-                  }
-                }
-              }
-            }
-          },
-          "responses": {"201": {"description": "Link created"}}
-        }
+        "responses": {"204": {"description": "Updated"}}
+      }
+    },
+    "/api/issues/search": {
+      "get": {
+        "operationId": "searchIssues",
+        "summary": "Search issues",
+        "parameters": [{"name": "query", "in": "query", "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Search results"}}
       }
     }
-  }' > /tmp/jira-openapi.json
+  }
+}
+SPEC_EOF
 
-  JIRA_CRED_CONFIG=$(jq -n --arg arn "$JIRA_API_KEY_ARN" \
-    '[{credentialProviderType:"API_KEY",credentialProvider:{apiKeyCredentialProvider:{providerArn:$arn,credentialPrefix:"Basic ",credentialLocation:"HEADER",credentialParameterName:"Authorization"}}}]')
+  # Replace placeholder with actual URL
+  sed -i.bak "s|PLACEHOLDER_URL|${YOUTRACK_BASE_URL}|g" /tmp/youtrack-openapi.json
+  rm -f /tmp/youtrack-openapi.json.bak
 
-  # Create or skip Jira gateway target
-  EXISTING_JIRA=$(aws bedrock-agentcore-control list-gateway-targets \
+  # Validate the JSON
+  if ! jq empty /tmp/youtrack-openapi.json 2>/dev/null; then
+    echo -e "${RED}Error: Invalid OpenAPI spec generated${NC}"
+    exit 1
+  fi
+
+  echo "  ✓ YouTrack OpenAPI spec generated"
+
+  YOUTRACK_CRED_CONFIG=$(jq -n --arg arn "$YOUTRACK_API_KEY_ARN" \
+    '[{credentialProviderType:"API_KEY",credentialProvider:{apiKeyCredentialProvider:{providerArn:$arn,credentialPrefix:"Bearer ",credentialLocation:"HEADER",credentialParameterName:"Authorization"}}}]')
+
+  # Create or skip YouTrack gateway target
+  EXISTING_YOUTRACK=$(aws bedrock-agentcore-control list-gateway-targets \
     --gateway-identifier $GATEWAY_ID --region $REGION \
-    --query "items[?name=='jira-mcp'].targetId" --output text 2>/dev/null)
+    --query "items[?name=='youtrack-mcp'].targetId" --output text 2>/dev/null)
 
-  if [ -z "$EXISTING_JIRA" ] || [ "$EXISTING_JIRA" = "None" ]; then
-    echo "  Creating Jira gateway target from generated spec..."
+  if [ -z "$EXISTING_YOUTRACK" ] || [ "$EXISTING_YOUTRACK" = "None" ]; then
+    echo "  Creating YouTrack gateway target from generated spec..."
     aws bedrock-agentcore-control create-gateway-target \
       --gateway-identifier $GATEWAY_ID \
-      --name "jira-mcp" \
-      --description "Jira ticket management" \
-      --target-configuration "{\"mcp\":{\"openApiSchema\":{\"inlinePayload\":$(jq -c < /tmp/jira-openapi.json | jq -Rs .)}}}" \
-      --credential-provider-configurations "$JIRA_CRED_CONFIG" \
+      --name "youtrack-mcp" \
+      --description "YouTrack ticket management" \
+      --target-configuration "{\"mcp\":{\"openApiSchema\":{\"inlinePayload\":$(jq -c < /tmp/youtrack-openapi.json | jq -Rs .)}}}" \
+      --credential-provider-configurations "$YOUTRACK_CRED_CONFIG" \
       --region $REGION >/dev/null 2>&1 && \
-      echo "  ✓ Jira gateway target created" || \
-      echo -e "${RED}  ✗ Jira target creation failed${NC}"
+      echo "  ✓ YouTrack gateway target created" || \
+      echo -e "${RED}  ✗ YouTrack target creation failed${NC}"
   else
-    echo "  ✓ Jira target already exists: $EXISTING_JIRA"
+    echo "  ✓ YouTrack target already exists: $EXISTING_YOUTRACK"
   fi
-else
-  GATEWAY_URL="GATEWAY_NOT_CONFIGURED"
-  echo -e "${YELLOW}⚠️  No gateway available - continuing without gateway${NC}"
+
 fi
 
 # Step 7b: Attach Cedar Authorization Policy to Gateway (LOG_ONLY mode)
@@ -1301,6 +1172,10 @@ if [ -n "$GATEWAY_ID" ] && [ "$GATEWAY_ID" != "None" ] && [ "$GATEWAY_ID" != "GA
       # Attach policy engine to gateway in LOG_ONLY mode
       UPDATE_RESPONSE=$(aws bedrock-agentcore-control update-gateway \
         --gateway-identifier "$GATEWAY_ID" \
+        --name "msp-assistant-gateway" \
+        --protocol-type MCP \
+        --authorizer-type AWS_IAM \
+        --role-arn "$GATEWAY_ROLE_ARN" \
         --policy-engine-configuration "{\"arn\":\"${POLICY_ENGINE_ARN}\",\"mode\":\"LOG_ONLY\"}" \
         --region $REGION --output json 2>&1 || true)
 
@@ -1329,10 +1204,10 @@ declare A2A_ARN_cloudwatch=""
 A2A_ARN_security=""
 A2A_ARN_cost=""
 A2A_ARN_advisor=""
-A2A_ARN_jira=""
+A2A_ARN_youtrack=""
 A2A_ARN_knowledge=""
 
-RUNTIMES=("cloudwatch" "security" "cost" "advisor" "jira" "knowledge")
+RUNTIMES=("cloudwatch" "security" "cost" "advisor" "youtrack" "knowledge")
 RUNTIME_COUNT=1
 
 # Copy shared files to all specialist dirs (skip cloudwatch to avoid "identical" error)
@@ -1374,6 +1249,45 @@ fi
 echo "  ✓ All shared files copied"
 echo ""
 
+# Apply IAM policies to agent role (READ-ONLY for AWS, WRITE-ONLY for YouTrack)
+echo "Setting up IAM permissions for agents (READ-ONLY for AWS, YouTrack ONLY for writes)..."
+AGENT_ROLE_NAME=$(aws iam list-roles --region $REGION --output json 2>/dev/null | jq -r '.Roles[] | select(.RoleName | contains("a2a")) | .RoleName' | head -1)
+
+if [ -n "$AGENT_ROLE_NAME" ]; then
+  # Check if readonly policy already exists
+  POLICY_EXISTS=$(aws iam list-role-policies --role-name "$AGENT_ROLE_NAME" --region $REGION --output json 2>/dev/null | jq -r '.PolicyNames[] | select(. == "AgentReadOnlyPolicy")' || echo "")
+
+  if [ -z "$POLICY_EXISTS" ]; then
+    echo "  Attaching READ-ONLY AWS policy to $AGENT_ROLE_NAME..."
+    aws iam put-role-policy \
+      --role-name "$AGENT_ROLE_NAME" \
+      --policy-name "AgentReadOnlyPolicy" \
+      --policy-document file://iam-agent-readonly-policy.json \
+      --region $REGION 2>/dev/null && echo "    ✓ READ-ONLY policy attached" || echo "    ⚠️ Failed to attach policy"
+  else
+    echo "  ✓ READ-ONLY policy already attached"
+  fi
+
+  # Attach YouTrack write policy
+  YOUTRACK_POLICY=$(aws iam list-role-policies --role-name "$AGENT_ROLE_NAME" --region $REGION --output json 2>/dev/null | jq -r '.PolicyNames[] | select(. == "YouTrackWritePolicy")' || echo "")
+
+  if [ -z "$YOUTRACK_POLICY" ]; then
+    echo "  Attaching YouTrack WRITE policy to $AGENT_ROLE_NAME..."
+    aws iam put-role-policy \
+      --role-name "$AGENT_ROLE_NAME" \
+      --policy-name "YouTrackWritePolicy" \
+      --policy-document file://iam-youtrack-write-policy.json \
+      --region $REGION 2>/dev/null && echo "    ✓ YouTrack WRITE policy attached" || echo "    ⚠️ Failed to attach policy"
+  else
+    echo "  ✓ YouTrack WRITE policy already attached"
+  fi
+
+  echo "  ✓ IAM permissions configured"
+else
+  echo -e "${YELLOW}⚠️  No A2A agent role found (will be created during deployment)${NC}"
+fi
+echo ""
+
 for runtime_name in "${RUNTIMES[@]}"; do
   echo "[8.${RUNTIME_COUNT}/6] Deploying ${runtime_name} A2A Runtime..."
   cd "$SCRIPT_DIR/agents/runtime_${runtime_name}"
@@ -1389,12 +1303,13 @@ GATEWAY_URL=$GATEWAY_URL
 MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0
 ENVEOF
 
-  # Jira specialist needs project config injected at container level
-  if [ "$runtime_name" = "jira" ]; then
+  # YouTrack specialist needs project config injected at container level
+  if [ "$runtime_name" = "youtrack" ]; then
     cat >> env_config.txt << ENVEOF
-JIRA_PROJECT_KEY=$JIRA_PROJECT_KEY
-JIRA_DOMAIN=$JIRA_DOMAIN
-JIRA_EMAIL=$JIRA_EMAIL
+YOUTRACK_PROJECT_ID=$YOUTRACK_PROJECT_ID
+YOUTRACK_PROJECT_NAME=$YOUTRACK_PROJECT_NAME
+YOUTRACK_URL=$YOUTRACK_URL
+YOUTRACK_TOKEN=$YOUTRACK_TOKEN
 ENVEOF
   fi
 
@@ -1503,12 +1418,12 @@ rm -f env_config.txt .env
 # Write env_config.txt (non-dotfile) that gets bundled into the container
 # a2a_client_helper.py reads this at startup as fallback for env vars
 cat > env_config.txt << ENVEOF
-# Auto-generated by deploy.sh — A2A specialist ARNs + Gateway + Jira config
+# Auto-generated by deploy.sh — A2A specialist ARNs + Gateway + YouTrack config
 CLOUDWATCH_A2A_ARN=$A2A_ARN_cloudwatch
 SECURITY_A2A_ARN=$A2A_ARN_security
 COST_A2A_ARN=$A2A_ARN_cost
 ADVISOR_A2A_ARN=$A2A_ARN_advisor
-JIRA_A2A_ARN=$A2A_ARN_jira
+YOUTRACK_A2A_ARN=$A2A_ARN_youtrack
 KNOWLEDGE_A2A_ARN=$A2A_ARN_knowledge
 GATEWAY_URL=$GATEWAY_URL
 MODEL_ID=${MODEL:-global.anthropic.claude-haiku-4-5-20251001-v1:0}
@@ -1517,9 +1432,10 @@ MAX_TOKENS=${MAX_TOKENS:-512}
 # Supervisor uses SUPERVISOR_MAX_TOKENS (isolated from specialist MAX_TOKENS=512).
 # Must be large enough to relay specialist responses (cost tables, ticket lists, etc.)
 SUPERVISOR_MAX_TOKENS=4096
-JIRA_PROJECT_KEY=$JIRA_PROJECT_KEY
-JIRA_DOMAIN=$JIRA_DOMAIN
-JIRA_EMAIL=$JIRA_EMAIL
+YOUTRACK_PROJECT_ID=$YOUTRACK_PROJECT_ID
+YOUTRACK_PROJECT_NAME=$YOUTRACK_PROJECT_NAME
+YOUTRACK_URL=$YOUTRACK_URL
+YOUTRACK_TOKEN=$YOUTRACK_TOKEN
 ENVEOF
 
 echo "✓ Wrote env_config.txt with A2A ARNs (bundled into container):"
@@ -1534,7 +1450,7 @@ if [ -f "backend/.env" ]; then
   update_env_var "SECURITY_A2A_ARN" "$A2A_ARN_security"
   update_env_var "COST_A2A_ARN" "$A2A_ARN_cost"
   update_env_var "ADVISOR_A2A_ARN" "$A2A_ARN_advisor"
-  update_env_var "JIRA_A2A_ARN" "$A2A_ARN_jira"
+  update_env_var "YOUTRACK_A2A_ARN" "$A2A_ARN_youtrack"
   update_env_var "KNOWLEDGE_A2A_ARN" "$A2A_ARN_knowledge"
   echo "✓ A2A specialist ARNs saved to backend/.env for direct routing"
   echo "  (ECS will pick these up on next deployment via CDK)"
@@ -1679,7 +1595,7 @@ cdk deploy MSPAssistantBackendStack --require-approval never \
   --context security_a2a_arn="$A2A_ARN_security" \
   --context cost_a2a_arn="$A2A_ARN_cost" \
   --context advisor_a2a_arn="$A2A_ARN_advisor" \
-  --context jira_a2a_arn="$A2A_ARN_jira" \
+  --context youtrack_a2a_arn="$A2A_ARN_youtrack" \
   --context knowledge_a2a_arn="$A2A_ARN_knowledge"
 
 echo "✓ ECS task definition updated with A2A ARNs"
@@ -2266,13 +2182,23 @@ fi
 # Must have: 8+ chars, uppercase, lowercase, digit, symbol
 TEMP_PASSWORD="Temp1$(openssl rand -base64 9 | tr -d '/+=' | head -c 9)!"
 
-aws cognito-idp admin-create-user \
+# Create user, skip if already exists
+CREATE_USER_RESPONSE=$(aws cognito-idp admin-create-user \
   --user-pool-id $USER_POOL_ID \
   --username $EMAIL \
   --user-attributes Name=email,Value=$EMAIL Name=email_verified,Value=true \
   --temporary-password "$TEMP_PASSWORD" \
   --message-action SUPPRESS \
-  --region $REGION
+  --region $REGION 2>&1 || true)
+
+if echo "$CREATE_USER_RESPONSE" | grep -q "UsernameExistsException\|already"; then
+  echo "  ⚠️  User already exists (skipping creation)"
+elif echo "$CREATE_USER_RESPONSE" | grep -q "error\|Error"; then
+  echo -e "${RED}Error creating user: $CREATE_USER_RESPONSE${NC}"
+  exit 1
+else
+  echo "  ✓ Cognito user created"
+fi
 
 echo ""
 echo -e "${YELLOW}[14/14] Syncing runbooks to Bedrock Knowledge Base...${NC}"
@@ -2326,4 +2252,6 @@ echo ""
 echo "View observability: https://console.aws.amazon.com/cloudwatch/home?region=$REGION#genai-observability"
 echo ""
 echo "Supervisor Runtime: $(jq -r '.MSPAssistantAgentCoreStack.SupervisorRuntimeARN' infrastructure/cdk/outputs.json)"
+echo ""
+echo "Deployment finished successfully at $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
