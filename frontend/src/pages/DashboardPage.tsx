@@ -47,6 +47,11 @@ export default function DashboardPage() {
     endDate: '',
   });
   const [appliedFilters, setAppliedFilters] = useState<DashboardQueryFilters>({});
+  const [creditsFilter, setCreditsFilter] = useState<{ label: string; value: string } | null>({
+    label: 'All Costs',
+    value: 'all'
+  });
+  const [appliedCreditsFilter, setAppliedCreditsFilter] = useState('all');
 
   const selectedScopeAccount = scope === 'all' ? 'all' : (selectedAccount?.id || 'default');
   const normalizedFilters = useMemo<DashboardQueryFilters>(() => ({
@@ -61,7 +66,7 @@ export default function DashboardPage() {
   // Refetch when the scope or selected account changes
   useEffect(() => {
     fetchCosts(selectedScopeAccount, periodMonths, appliedFilters);
-  }, [selectedScopeAccount, periodMonths, appliedFilters, fetchCosts]);
+  }, [selectedScopeAccount, periodMonths, appliedFilters, appliedCreditsFilter, fetchCosts]);
 
   const currencyFormatter = (value: number) => `$${value.toFixed(2)}`;
 
@@ -76,7 +81,11 @@ export default function DashboardPage() {
     setFilterErrors('');
     setCurrentPage(1);
     setAppliedFilters(normalizedFilters);
-    trackActionPerformed('apply_filters', { filters: normalizedFilters });
+    setAppliedCreditsFilter(creditsFilter?.value || 'all');
+    trackActionPerformed('apply_filters', {
+      filters: normalizedFilters,
+      creditsFilter: creditsFilter?.value || 'all'
+    });
     showToast('Filters applied successfully', 'success');
   };
 
@@ -98,6 +107,8 @@ export default function DashboardPage() {
         };
         setDashboardFilters(resetFilters);
         setAppliedFilters({});
+        setCreditsFilter({ label: 'All Costs', value: 'all' });
+        setAppliedCreditsFilter('all');
         setFilterErrors('');
         showToast('Filters reset successfully', 'success');
       },
@@ -268,20 +279,46 @@ export default function DashboardPage() {
         </Grid>
         <Box padding={{ top: 'm' }}>
           <Grid gridDefinition={[{ colspan: { default: 12, m: 4 } }, { colspan: { default: 12, m: 4 } }, { colspan: { default: 12, m: 4 } }]}>
-            <FormField label="Start date" description="Select start date for analysis">
-              <DatePicker
-                value={dashboardFilters.startDate || ''}
-                onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, startDate: detail.value }))}
-                placeholder="YYYY-MM-DD"
+            <FormField label="Credits Filter" description="View costs with or without applied credits">
+              <Select
+                selectedOption={creditsFilter}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption) {
+                    setCreditsFilter({
+                      label: detail.selectedOption.label || 'All Costs',
+                      value: detail.selectedOption.value || 'all'
+                    });
+                  }
+                }}
+                options={[
+                  { label: 'All Costs', value: 'all', description: 'Show net costs after credits' },
+                  { label: 'Without Credits', value: 'without_credits', description: 'Show actual usage costs' },
+                  { label: 'With Credits Applied', value: 'with_credits', description: 'Show costs after credits' },
+                ] as any}
               />
             </FormField>
-            <FormField label="End date" description="Select end date for analysis">
-              <DatePicker
-                value={dashboardFilters.endDate || ''}
-                onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, endDate: detail.value }))}
-                placeholder="YYYY-MM-DD"
-              />
-            </FormField>
+          </Grid>
+        </Box>
+        <Box padding={{ top: 'm' }}>
+          <Grid gridDefinition={[{ colspan: { default: 12, m: 4 } }, { colspan: { default: 12, m: 4 } }, { colspan: { default: 12, m: 4 } }]}>
+            <div style={{ position: 'relative', zIndex: 10 }}>
+              <FormField label="Start date" description="Select start date for analysis">
+                <DatePicker
+                  value={dashboardFilters.startDate || ''}
+                  onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, startDate: detail.value }))}
+                  placeholder="YYYY-MM-DD"
+                />
+              </FormField>
+            </div>
+            <div style={{ position: 'relative', zIndex: 10 }}>
+              <FormField label="End date" description="Select end date for analysis">
+                <DatePicker
+                  value={dashboardFilters.endDate || ''}
+                  onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, endDate: detail.value }))}
+                  placeholder="YYYY-MM-DD"
+                />
+              </FormField>
+            </div>
             <SpaceBetween direction="horizontal" size="xs">
               <Button
                 onClick={handleApplyFilters}
@@ -305,32 +342,48 @@ export default function DashboardPage() {
       {isLoading ? (
         <SkeletonKPIs />
       ) : (
-        <div className="dashboard-kpis">
-          <div className="dashboard-kpi">
-            <div className="dashboard-kpi__label">Total Unblended Cost ({periodMonths} Month{periodMonths > 1 ? 's' : ''})</div>
-            <div className="dashboard-kpi__value dashboard-kpi__value--highlight">
-              {currencyFormatter(data?.total_cost || 0)}
+        <>
+          {appliedCreditsFilter !== 'all' && data?.applied_credits && (
+            <Alert type="info" header="Credits Filter Active">
+              Showing costs {appliedCreditsFilter === 'without_credits' ? 'without' : 'with'} applied credits.
+              {data?.applied_credits && (
+                <span style={{ fontWeight: 'bold' }}>
+                  {' '}Applied Credits: {currencyFormatter(Math.abs(data.applied_credits))}
+                </span>
+              )}
+            </Alert>
+          )}
+          <div className="dashboard-kpis">
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi__label">
+                Total Cost ({periodMonths} Month{periodMonths > 1 ? 's' : ''})
+                {appliedCreditsFilter === 'without_credits' && <span style={{ fontSize: '0.8em' }}> (Actual Usage)</span>}
+                {appliedCreditsFilter === 'with_credits' && <span style={{ fontSize: '0.8em' }}> (Net Cost)</span>}
+              </div>
+              <div className="dashboard-kpi__value dashboard-kpi__value--highlight">
+                {currencyFormatter(data?.total_cost || 0)}
+              </div>
+            </div>
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi__label">Highest Cost Category</div>
+              <div className="dashboard-kpi__value">
+                {topCategory}
+              </div>
+            </div>
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi__label">Highest Cost Service</div>
+              <div className="dashboard-kpi__value">
+                {topService}
+              </div>
+            </div>
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi__label">Accounts Scanned</div>
+              <div className="dashboard-kpi__value dashboard-kpi__value--accent">
+                {accountsCount}
+              </div>
             </div>
           </div>
-          <div className="dashboard-kpi">
-            <div className="dashboard-kpi__label">Highest Cost Category</div>
-            <div className="dashboard-kpi__value">
-              {topCategory}
-            </div>
-          </div>
-          <div className="dashboard-kpi">
-            <div className="dashboard-kpi__label">Highest Cost Service</div>
-            <div className="dashboard-kpi__value">
-              {topService}
-            </div>
-          </div>
-          <div className="dashboard-kpi">
-            <div className="dashboard-kpi__label">Accounts Scanned</div>
-            <div className="dashboard-kpi__value dashboard-kpi__value--accent">
-              {accountsCount}
-            </div>
-          </div>
-        </div>
+        </>
       )}
 
       {/* Charts Section */}

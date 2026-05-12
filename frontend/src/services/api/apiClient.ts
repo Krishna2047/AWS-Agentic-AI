@@ -41,6 +41,41 @@ interface AccountCreateResponse {
   setup_instructions: any;
 }
 
+interface DashboardCostResponse {
+  success: boolean;
+  data: {
+    total_cost: number;
+    cost_by_account: Record<string, number>;
+    cost_by_category: Record<string, number>;
+    cost_by_service: Array<{
+      service_name: string;
+      category: string;
+      cost: number;
+      accounts: Record<string, number>;
+    }>;
+    monthly_trend: Record<string, number>;
+    errors: Array<{ account: string; error: string }>;
+    start_date?: string;
+    end_date?: string;
+    applied_filters?: {
+      project_name?: string;
+      environment?: string;
+      ownership?: string;
+      cost_type?: string;
+    };
+  };
+  message?: string;
+}
+
+export interface DashboardQueryFilters {
+  startDate?: string;
+  endDate?: string;
+  projectName?: string;
+  environment?: string;
+  ownership?: string;
+  costType?: string;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 // Stream URL routes through CloudFront → ALB to bypass API Gateway's response buffering.
@@ -52,6 +87,20 @@ class APIClient {
   private client: AxiosInstance;
   // Shared promise prevents concurrent 401 restores from racing
   private restorePromise: Promise<any> | null = null;
+
+  private buildDashboardQuery(account: string, months: number, filters?: DashboardQueryFilters): string {
+    const params = new URLSearchParams({
+      account,
+      months: String(months),
+    });
+    if (filters?.startDate) params.set('start_date', filters.startDate);
+    if (filters?.endDate) params.set('end_date', filters.endDate);
+    if (filters?.projectName) params.set('project_name', filters.projectName);
+    if (filters?.environment) params.set('environment', filters.environment);
+    if (filters?.ownership) params.set('ownership', filters.ownership);
+    if (filters?.costType) params.set('cost_type', filters.costType);
+    return params.toString();
+  }
 
   constructor() {
     this.client = axios.create({
@@ -122,7 +171,8 @@ class APIClient {
    */
   async sendMessage(
     request: ChatRequest,
-    onProgress?: (progress: ChatPollResponse['progress']) => void
+    onProgress?: (progress: ChatPollResponse['progress']) => void,
+    signal?: AbortSignal
   ): Promise<ChatResponse> {
     // Step 1: Submit request (returns instantly with request_id)
     const submitRes = await this.client.post('/chat', {
@@ -135,13 +185,16 @@ class APIClient {
     const { request_id } = submitRes.data;
 
     // Step 2: Poll for result every 1 second (reduced from 2s)
-    const MAX_POLL_TIME = 300_000; // 5 minutes max
+    const MAX_POLL_TIME = 900_000; // 15 minutes max (allows agents time to query AWS)
     const POLL_INTERVAL = 1000; // 1 second (reduced from 2s for faster perceived response)
     const startTime = Date.now();
     let consecutiveErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 3;
 
     while (Date.now() - startTime < MAX_POLL_TIME) {
+      if (signal?.aborted) {
+        throw new DOMException('Request stopped by user', 'AbortError');
+      }
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
 
       try {
@@ -181,7 +234,7 @@ class APIClient {
       }
     }
 
-    throw new Error('Request timed out after 5 minutes');
+    throw new Error('Request timed out after 15 minutes');
   }
 
   /**
@@ -206,7 +259,8 @@ class APIClient {
    */
   async sendMessageStream(
     request: ChatRequest,
-    onEvent: (event: SSEProgressEvent) => void
+    onEvent: (event: SSEProgressEvent) => void,
+    signal?: AbortSignal
   ): Promise<ChatResponse> {
     // Step 1: Submit request (returns instantly with request_id)
     const submitRes = await this.client.post('/chat', {
@@ -222,7 +276,7 @@ class APIClient {
     const { idToken } = getInMemoryTokens();
     if (!idToken) {
       // No token — fall back to poll
-      return this.sendMessage(request);
+      return this.sendMessage(request, undefined, signal);
     }
 
     const streamUrl = `${STREAM_BASE_URL}/chat/${request_id}/stream`;
@@ -230,6 +284,7 @@ class APIClient {
     try {
       const response = await fetch(streamUrl, {
         method: 'GET',
+        signal,
         credentials: 'include', // send httpOnly cookie
         headers: {
           'Authorization': `Bearer ${idToken}`,
@@ -240,7 +295,7 @@ class APIClient {
 
       if (!response.ok || !response.body) {
         console.warn('SSE stream unavailable, falling back to poll');
-        return this.pollForResult(request_id, onEvent);
+        return this.pollForResult(request_id, onEvent, signal);
       }
 
       const reader = response.body.getReader();
@@ -288,7 +343,11 @@ class APIClient {
             // Return on complete event
             if (currentEvent === 'complete' && parsedData.result) {
               reader.cancel();
-              return parsedData.result as ChatResponse;
+              const result = parsedData.result as ChatResponse;
+              if (result.agent_type?.toLowerCase() === 'error') {
+                result.agent_type = 'supervisor';
+              }
+              return result;
             }
 
             // Throw on error event (must be outside try/catch to propagate correctly)
@@ -314,7 +373,11 @@ class APIClient {
           };
           onEvent(sseEvent);
           if (currentEvent === 'complete' && parsedData.result) {
-            return parsedData.result as ChatResponse;
+            const result = parsedData.result as ChatResponse;
+            if (result.agent_type?.toLowerCase() === 'error') {
+              result.agent_type = 'supervisor';
+            }
+            return result;
           }
         } catch {
           // ignore parse error on trailing event
@@ -322,12 +385,15 @@ class APIClient {
       }
 
       // Stream ended without complete event — fall back to poll
-      return this.pollForResult(request_id, onEvent);
+      return this.pollForResult(request_id, onEvent, signal);
 
     } catch (streamError: any) {
+      if (streamError?.name === 'AbortError' || signal?.aborted) {
+        throw streamError;
+      }
       console.warn('SSE streaming failed, falling back to poll:', streamError.message);
       try {
-        return await this.pollForResult(request_id, onEvent);
+        return await this.pollForResult(request_id, onEvent, signal);
       } catch (pollError: any) {
         throw new Error(`Streaming failed (${streamError.message}) and polling also failed (${pollError.message})`);
       }
@@ -347,7 +413,8 @@ class APIClient {
    */
   private async pollForResult(
     requestId: string,
-    onEvent?: (event: SSEProgressEvent) => void
+    onEvent?: (event: SSEProgressEvent) => void,
+    signal?: AbortSignal
   ): Promise<ChatResponse> {
     const MAX_POLL_TIME = 300_000;
     const POLL_INTERVAL = 1000;
@@ -355,6 +422,9 @@ class APIClient {
     let lastStage = '';
 
     while (Date.now() - startTime < MAX_POLL_TIME) {
+      if (signal?.aborted) {
+        throw new DOMException('Request stopped by user', 'AbortError');
+      }
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
       try {
         const pollRes = await this.client.get(`/chat/${requestId}`);
@@ -376,12 +446,15 @@ class APIClient {
 
         if (data.status === 'complete' && data.result) {
           // Emit agent_switch on completion so badge shows correct agent
-          if (onEvent && data.result.agent_type) {
+          if (onEvent && data.result.agent_type && data.result.agent_type.toLowerCase() !== 'error') {
             onEvent({
               event: 'agent_switch',
               data: { to_agent: data.result.agent_type },
               request_id: requestId,
             });
+          }
+          if (data.result.agent_type?.toLowerCase() === 'error') {
+            data.result.agent_type = 'supervisor';
           }
           return data.result;
         }
@@ -391,7 +464,7 @@ class APIClient {
         throw error;
       }
     }
-    throw new Error('Request timed out after 5 minutes');
+    throw new Error('Request timed out after 15 minutes');
   }
 
   /**
@@ -543,6 +616,31 @@ class APIClient {
   }
 
   /**
+   * Get aggregated dashboard cost data using the standard auth/restore flow.
+   */
+  async getDashboardCosts(account = 'all', months = 6, filters?: DashboardQueryFilters): Promise<DashboardCostResponse> {
+    const response = await this.client.get<DashboardCostResponse>(`/dashboard/costs?${this.buildDashboardQuery(account, months, filters)}`);
+    return response.data;
+  }
+
+  async exportDashboardCosts(account = 'all', months = 6, filters?: DashboardQueryFilters): Promise<void> {
+    const response = await this.client.get(`/dashboard/costs/export?${this.buildDashboardQuery(account, months, filters)}`, {
+      responseType: 'blob',
+    });
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `aws-costs-${account}-${months}m.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  }
+
+  /**
    * Get scheduled AWS maintenance
    */
   async getHealthScheduled(): Promise<any> {
@@ -574,7 +672,7 @@ class APIClient {
    * so `onStepProgress` receives incremental step updates in real time.
    *
    * @param workflowId - The workflow to approve.
-   * @param stepType - Step identifier, e.g. `"full_auto"`, `"jira"`, `"remediation"`.
+   * @param stepType - Step identifier, e.g. `"full_auto"`, `"youtrack"` (YouTrack phase), `"remediation"`.
    * @param onStepProgress - Optional callback invoked for each new `workflow_step` event
    *   arriving from `streaming_events`; useful for live-updating `fullAutoStatus` in the store.
    * @returns Final result object from the backend once all steps complete.
@@ -592,7 +690,7 @@ class APIClient {
    * Poll for workflow step result (reuses chat polling endpoint)
    */
   private async pollWorkflowStep(requestId: string, onStepProgress?: (step: any) => void): Promise<any> {
-    const MAX_POLL_TIME = 300_000; // 5 minutes max
+    const MAX_POLL_TIME = 900_000; // 15 minutes max (allows agents time to query AWS)
     const POLL_INTERVAL = 2000; // 2 seconds
     const startTime = Date.now();
     let lastSeenSteps = 0;
@@ -666,6 +764,48 @@ class APIClient {
    */
   async getAutomationProgress(workflowId: string): Promise<any> {
     const response = await this.client.get(`/workflows/${workflowId}/progress`);
+    return response.data;
+  }
+
+  /**
+   * Calculate pricing from infrastructure code (Terraform/CDK/CloudFormation)
+   */
+  async calculatePricingFromCode(payload: {
+    code_type: string;
+    code_content: string;
+    account_name: string;
+  }): Promise<any> {
+    const response = await this.client.post('/pricing/calculate/code', payload);
+    return response.data;
+  }
+
+  /**
+   * Calculate pricing from selected AWS services
+   */
+  async calculatePricingFromServices(payload: {
+    account_name: string;
+    services: string[];
+    region: string;
+  }): Promise<any> {
+    const response = await this.client.post('/pricing/calculate/services', payload);
+    return response.data;
+  }
+
+  /**
+   * Get costs with and without credits breakdown
+   */
+  async getCostsWithCreditsBreakdown(
+    account?: string,
+    months: number = 3,
+    creditsFilter: string = 'all'
+  ): Promise<any> {
+    const response = await this.client.get('/costs/with-breakdown', {
+      params: {
+        account: account || undefined,
+        months,
+        credits_filter: creditsFilter
+      }
+    });
     return response.data;
   }
 }
