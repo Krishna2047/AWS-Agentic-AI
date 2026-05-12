@@ -14,11 +14,14 @@ import Alert from '@cloudscape-design/components/alert';
 import FormField from '@cloudscape-design/components/form-field';
 import Input from '@cloudscape-design/components/input';
 import Select from '@cloudscape-design/components/select';
+import DatePicker from '@cloudscape-design/components/date-picker';
 import { useDashboardStore } from '../store/dashboardStore';
 import { useAccountStore } from '../store/accountStore';
 import { useToast } from '../components/Toast/ToastContext';
 import { useConfirm } from '../components/ConfirmModal';
+import { useAnalytics } from '../hooks/useAnalytics';
 import { Breadcrumbs } from '../components/Breadcrumbs';
+import { Pagination } from '../components/Pagination';
 import { SkeletonKPIs, SkeletonChart, SkeletonTable } from '../components/SkeletonLoader';
 import { DashboardFilterSchema, validateInput } from '../utils/validation';
 import type { DashboardQueryFilters } from '../services/api/apiClient';
@@ -28,10 +31,13 @@ export default function DashboardPage() {
   const { selectedAccount } = useAccountStore();
   const { showToast } = useToast();
   const { confirm, ConfirmModal } = useConfirm();
+  const { trackActionPerformed } = useAnalytics('DashboardPage');
   const [scope, setScope] = useState<'all' | 'selected'>('all');
   const [periodMonths, setPeriodMonths] = useState<3 | 6 | 12>(6);
   const [filteringText, setFilteringText] = useState('');
   const [filterErrors, setFilterErrors] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [dashboardFilters, setDashboardFilters] = useState<DashboardQueryFilters>({
     projectName: '',
     environment: '',
@@ -68,7 +74,9 @@ export default function DashboardPage() {
     }
 
     setFilterErrors('');
+    setCurrentPage(1);
     setAppliedFilters(normalizedFilters);
+    trackActionPerformed('apply_filters', { filters: normalizedFilters });
     showToast('Filters applied successfully', 'success');
   };
 
@@ -142,11 +150,19 @@ export default function DashboardPage() {
   // Filter services locally for the table
   const filteredServices = useMemo(() => {
     if (!data?.cost_by_service) return [];
-    return data.cost_by_service.filter(item => 
+    return data.cost_by_service.filter(item =>
       item.service_name.toLowerCase().includes(filteringText.toLowerCase()) ||
       item.category.toLowerCase().includes(filteringText.toLowerCase())
     );
   }, [data, filteringText]);
+
+  // Paginate filtered services
+  const paginatedServices = useMemo(() => {
+    const startIdx = (currentPage - 1) * pageSize;
+    return filteredServices.slice(startIdx, startIdx + pageSize);
+  }, [filteredServices, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(filteredServices.length / pageSize);
 
   // Calculate top-level KPIs
   const topCategory = data ? Object.entries(data.cost_by_category).sort((a, b) => b[1] - a[1])[0]?.[0] : 'N/A';
@@ -252,18 +268,18 @@ export default function DashboardPage() {
         </Grid>
         <Box padding={{ top: 'm' }}>
           <Grid gridDefinition={[{ colspan: { default: 12, m: 4 } }, { colspan: { default: 12, m: 4 } }, { colspan: { default: 12, m: 4 } }]}>
-            <FormField label="Start date">
-              <Input
+            <FormField label="Start date" description="Select start date for analysis">
+              <DatePicker
                 value={dashboardFilters.startDate || ''}
-                placeholder="YYYY-MM-DD"
                 onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, startDate: detail.value }))}
+                placeholder="YYYY-MM-DD"
               />
             </FormField>
-            <FormField label="End date">
-              <Input
+            <FormField label="End date" description="Select end date for analysis">
+              <DatePicker
                 value={dashboardFilters.endDate || ''}
-                placeholder="YYYY-MM-DD"
                 onChange={({ detail }) => setDashboardFilters((prev) => ({ ...prev, endDate: detail.value }))}
+                placeholder="YYYY-MM-DD"
               />
             </FormField>
             <SpaceBetween direction="horizontal" size="xs">
@@ -384,21 +400,24 @@ export default function DashboardPage() {
       <Container>
         <Table
           header={
-            <Header 
-              variant="h2" 
+            <Header
+              variant="h2"
               counter={filteredServices.length ? `(${filteredServices.length})` : ''}
               description={`Itemized list of all AWS services incurring costs over the last ${periodMonths} month${periodMonths > 1 ? 's' : ''}.`}
             >
               All AWS Services
             </Header>
           }
-          items={filteredServices}
+          items={paginatedServices}
           loading={isLoading}
           loadingText="Retrieving service costs..."
           filter={
             <TextFilter
               filteringText={filteringText}
-              onChange={({ detail }) => setFilteringText(detail.filteringText)}
+              onChange={({ detail }) => {
+                setFilteringText(detail.filteringText);
+                setCurrentPage(1);
+              }}
               filteringPlaceholder="Search by service name or category..."
             />
           }
@@ -406,9 +425,9 @@ export default function DashboardPage() {
             { id: 'service', header: 'Service Name', cell: item => <span style={{fontWeight: 'bold'}}>{item.service_name}</span> },
             { id: 'category', header: 'Category', cell: item => item.category },
             { id: 'cost', header: 'Total Cost', cell: item => currencyFormatter(item.cost) },
-            { 
-              id: 'percentage', 
-              header: '% of Total', 
+            {
+              id: 'percentage',
+              header: '% of Total',
               cell: item => (
                 <Box color={item.cost / (data?.total_cost || 1) > 0.2 ? "text-status-error" : "text-status-info"}>
                   {((item.cost / (data?.total_cost || 1)) * 100).toFixed(2)}%
@@ -423,6 +442,18 @@ export default function DashboardPage() {
           }
           variant="embedded"
           stripedRows
+        />
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={filteredServices.length}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+            trackActionPerformed('change_page_size', { pageSize: newSize });
+          }}
         />
       </Container>
       </div>

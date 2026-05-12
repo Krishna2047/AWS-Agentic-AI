@@ -5,8 +5,9 @@ import Container from '@cloudscape-design/components/container';
 import Box from '@cloudscape-design/components/box';
 import Button from '@cloudscape-design/components/button';
 import PromptInput from '@cloudscape-design/components/prompt-input';
-import DateRangePicker from '@cloudscape-design/components/date-range-picker';
 import Tabs from '@cloudscape-design/components/tabs';
+import FormField from '@cloudscape-design/components/form-field';
+import Input from '@cloudscape-design/components/input';
 import { useChatStore } from '../store/chatStore';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useAccountStore } from '../store/accountStore';
@@ -41,10 +42,6 @@ function buildRoutingReason(message: string, agentHint: string): string {
 }
 
 function MainAppPage() {
-  const [dateRange, setDateRange] = useState({
-    startDate: new Date(new Date().getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0],
-  });
 
   const {
     messages,
@@ -384,32 +381,6 @@ function MainAppPage() {
                                     Stop
                                   </Button>
                                 )}
-                              </div>
-
-                              <div style={{ marginTop: '12px' }}>
-                                <DateRangePicker
-                                  value={{
-                                    type: 'absolute' as const,
-                                    startDate: dateRange.startDate,
-                                    endDate: dateRange.endDate,
-                                  } as any}
-                                  onChange={({ detail }) => {
-                                    if (detail.value && typeof detail.value === 'object' && 'startDate' in detail.value) {
-                                      const val = detail.value as any;
-                                      setDateRange({
-                                        startDate: val.startDate || dateRange.startDate,
-                                        endDate: val.endDate || dateRange.endDate,
-                                      });
-                                    }
-                                  }}
-                                  relativeOptions={[
-                                    { key: 'previous-7-days', text: 'Last 7 days', value: () => ({ startDate: new Date(new Date().getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0] }) },
-                                    { key: 'previous-30-days', text: 'Last 30 days', value: () => ({ startDate: new Date(new Date().getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0] }) },
-                                    { key: 'previous-90-days', text: 'Last 90 days', value: () => ({ startDate: new Date(new Date().getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0] }) },
-                                  ] as any}
-                                  placeholder="YYYY-MM-DD"
-                                  isValidRange={() => ({ valid: true } as any)}
-                                />
                               </div>
 
                               <div className="chat-tips">
