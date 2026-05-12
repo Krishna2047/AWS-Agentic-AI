@@ -1,0 +1,487 @@
+/* ============================================================================
+   MODERN PROFESSIONAL THEME - AWS MSP Smart Agent Assist
+   ============================================================================
+   Modern gradient-based color scheme with improved contrast and visual hierarchy
+   Date: May 12, 2026
+   ========================================================================== */
+
+:root {
+  /* Primary Colors - Modern Blue-Purple Gradient */
+  --color-primary-dark: #0f3a7d;        /* Deep Blue */
+  --color-primary-main: #1b5ac5;        /* Professional Blue */
+  --color-primary-light: #4a90e2;       /* Light Blue */
+  --color-primary-lighter: #e3f2fd;     /* Very Light Blue */
+
+  /* Accent Colors - Emerald-Teal */
+  --color-accent-dark: #00695c;         /* Dark Teal */
+  --color-accent-main: #009688;         /* Teal */
+  --color-accent-light: #26a69a;        /* Light Teal */
+  --color-accent-lighter: #e0f2f1;      /* Very Light Teal */
+
+  /* Secondary Accent - Coral/Orange */
+  --color-secondary-dark: #d84315;      /* Deep Orange */
+  --color-secondary-main: #ff6e40;      /* Coral */
+  --color-secondary-light: #ff9a76;     /* Light Coral */
+  --color-secondary-lighter: #ffe0d5;   /* Very Light Coral */
+
+  /* Success Colors */
+  --color-success: #10b981;              /* Emerald Green */
+  --color-success-light: #d1fae5;        /* Light Emerald */
+
+  /* Warning Colors */
+  --color-warning: #f59e0b;              /* Amber */
+  --color-warning-light: #fef3c7;        /* Light Amber */
+
+  /* Error Colors */
+  --color-error: #ef4444;                /* Red */
+  --color-error-light: #fee2e2;          /* Light Red */
+
+  /* Neutral Colors - Professional Grays */
+  --color-neutral-900: #0f172a;          /* Almost Black */
+  --color-neutral-800: #1e293b;          /* Dark Slate */
+  --color-neutral-700: #334155;          /* Slate */
+  --color-neutral-600: #475569;          /* Medium Slate */
+  --color-neutral-500: #64748b;          /* Gray */
+  --color-neutral-400: #94a3b8;          /* Light Gray */
+  --color-neutral-300: #cbd5e1;          /* Lighter Gray */
+  --color-neutral-200: #e2e8f0;          /* Very Light Gray */
+  --color-neutral-100: #f1f5f9;          /* Almost White */
+  --color-neutral-50: #f8fafc;           /* Off White */
+
+  /* Background Colors */
+  --bg-primary: #ffffff;                 /* White background */
+  --bg-secondary: #f8fafc;               /* Off-white background */
+  --bg-tertiary: #f1f5f9;                /* Light gray background */
+  --bg-overlay: rgba(15, 23, 42, 0.7);   /* Dark overlay */
+
+  /* Sidebar Colors */
+  --sidebar-bg: #1e293b;                 /* Dark Slate */
+  --sidebar-text: #f1f5f9;               /* Light Gray */
+  --sidebar-hover: #334155;              /* Medium Slate */
+  --sidebar-active: #1b5ac5;             /* Professional Blue */
+  --sidebar-border: #334155;             /* Slate Border */
+
+  /* Dashboard Colors */
+  --dashboard-header-bg: linear-gradient(135deg, #0f3a7d 0%, #1b5ac5 100%);
+  --dashboard-card-bg: #ffffff;
+  --dashboard-card-border: #e2e8f0;
+  --dashboard-card-shadow: 0 1px 3px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --dashboard-card-shadow-hover: 0 10px 15px rgba(15, 23, 42, 0.1), 0 4px 6px rgba(15, 23, 42, 0.05);
+
+  /* Chart Colors */
+  --chart-primary: #1b5ac5;
+  --chart-secondary: #009688;
+  --chart-accent: #ff6e40;
+  --chart-success: #10b981;
+  --chart-warning: #f59e0b;
+  --chart-error: #ef4444;
+  --chart-info: #0ea5e9;
+
+  /* Text Colors */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+  --text-inverse: #f1f5f9;
+
+  /* Border and Divider */
+  --border-color: #e2e8f0;
+  --border-color-dark: #cbd5e1;
+  --divider-color: #f1f5f9;
+
+  /* Spacing Scale */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  --spacing-3xl: 48px;
+
+  /* Typography */
+  --font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-family-mono: 'Monaco', 'Menlo', 'Consolas', monospace;
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+
+  /* Line Heights */
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 6px rgba(15, 23, 42, 0.1), 0 2px 4px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 10px 15px rgba(15, 23, 42, 0.1), 0 4px 6px rgba(15, 23, 42, 0.05);
+  --shadow-xl: 0 20px 25px rgba(15, 23, 42, 0.1), 0 10px 10px rgba(15, 23, 42, 0.04);
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Border Radius */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* Z-Index Scale */
+  --z-dropdown: 1000;
+  --z-sticky: 1100;
+  --z-fixed: 1200;
+  --z-modal-backdrop: 1300;
+  --z-modal: 1400;
+  --z-tooltip: 1500;
+  --z-notification: 1600;
+}
+
+/* ============================================================================
+   LIGHT MODE (Default)
+   ========================================================================== */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --bg-tertiary: #f1f5f9;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-tertiary: #94a3b8;
+  }
+
+  body {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+}
+
+/* ============================================================================
+   DARK MODE
+   ========================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg-primary: #1e293b;
+    --bg-secondary: #0f172a;
+    --bg-tertiary: #1a202c;
+    --sidebar-bg: #0f172a;
+    --sidebar-text: #e2e8f0;
+    --sidebar-hover: #1e293b;
+    --dashboard-card-bg: #1e293b;
+    --dashboard-card-border: #334155;
+    --dashboard-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-tertiary: #94a3b8;
+    --border-color: #334155;
+    --divider-color: #1a202c;
+  }
+
+  body {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+}
+
+/* ============================================================================
+   GLOBAL STYLES
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================================
+   LAYOUT FIXES
+   ========================================================================== */
+
+/* Main container - Unified scaling */
+.awsui-app-layout {
+  display: flex !important;
+  width: 100% !important;
+  height: 100vh !important;
+}
+
+/* Sidebar - No gaps, proper sizing */
+.awsui-app-layout [data-testid="app-layout-sidebar"] {
+  width: 260px !important;
+  background-color: var(--sidebar-bg) !important;
+  border-right: 1px solid var(--sidebar-border) !important;
+  flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Main content area - Proper flex growth */
+.awsui-app-layout [data-testid="app-layout-main"] {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: auto;
+  background-color: var(--bg-secondary) !important;
+}
+
+/* Navigation panel - Proper text color */
+.navigation-panel {
+  color: var(--sidebar-text) !important;
+}
+
+.navigation-panel a,
+.navigation-panel button {
+  color: var(--sidebar-text) !important;
+}
+
+.navigation-panel a:hover,
+.navigation-panel button:hover {
+  background-color: var(--sidebar-hover) !important;
+  color: var(--sidebar-text) !important;
+}
+
+.navigation-panel [data-current="true"],
+.navigation-panel .active {
+  background-color: var(--sidebar-active) !important;
+  color: #ffffff !important;
+}
+
+/* ============================================================================
+   MODAL AND DIALOG FIXES
+   ========================================================================== */
+
+/* Export modal - Proper sizing and positioning */
+.awsui-modal {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  max-width: 90vw !important;
+  max-height: 90vh !important;
+  z-index: var(--z-modal) !important;
+}
+
+.awsui-modal-backdrop {
+  z-index: var(--z-modal-backdrop) !important;
+  background-color: var(--bg-overlay) !important;
+}
+
+/* Modal content - Proper scrolling */
+.awsui-modal-content {
+  max-height: 80vh !important;
+  overflow-y: auto !important;
+  background-color: var(--bg-primary) !important;
+}
+
+/* Modal header */
+.awsui-modal-header {
+  border-bottom: 1px solid var(--border-color) !important;
+  padding: var(--spacing-lg) !important;
+  background-color: var(--bg-primary) !important;
+}
+
+/* Modal body */
+.awsui-modal-body {
+  padding: var(--spacing-lg) !important;
+  background-color: var(--bg-primary) !important;
+}
+
+/* Modal footer */
+.awsui-modal-footer {
+  border-top: 1px solid var(--border-color) !important;
+  padding: var(--spacing-lg) !important;
+  background-color: var(--bg-primary) !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: var(--spacing-md) !important;
+}
+
+/* ============================================================================
+   DASHBOARD CARDS
+   ========================================================================== */
+
+.dashboard-card,
+.awsui-container {
+  background-color: var(--dashboard-card-bg) !important;
+  border: 1px solid var(--dashboard-card-border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--dashboard-card-shadow) !important;
+  padding: var(--spacing-lg) !important;
+  transition: all var(--transition-base) !important;
+}
+
+.dashboard-card:hover,
+.awsui-container:hover {
+  box-shadow: var(--dashboard-card-shadow-hover) !important;
+}
+
+/* ============================================================================
+   BUTTONS
+   ========================================================================== */
+
+/* Primary button */
+.awsui-button[variant="primary"],
+button.primary {
+  background: linear-gradient(135deg, var(--color-primary-main) 0%, var(--color-primary-dark) 100%) !important;
+  color: #ffffff !important;
+  border: none !important;
+  padding: var(--spacing-sm) var(--spacing-lg) !important;
+  border-radius: var(--radius-md) !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all var(--transition-base) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.awsui-button[variant="primary"]:hover,
+button.primary:hover {
+  box-shadow: var(--shadow-md) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Secondary button */
+.awsui-button[variant="normal"],
+button.secondary {
+  background-color: var(--bg-tertiary) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  padding: var(--spacing-sm) var(--spacing-lg) !important;
+  border-radius: var(--radius-md) !important;
+  transition: all var(--transition-base) !important;
+}
+
+.awsui-button[variant="normal"]:hover,
+button.secondary:hover {
+  background-color: var(--border-color) !important;
+  border-color: var(--border-color-dark) !important;
+}
+
+/* ============================================================================
+   FORMS AND INPUTS
+   ========================================================================== */
+
+input[type="text"],
+input[type="email"],
+input[type="date"],
+select,
+textarea,
+.awsui-input-container input {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: var(--radius-md) !important;
+  padding: var(--spacing-sm) var(--spacing-md) !important;
+  font-family: var(--font-family-base) !important;
+  transition: all var(--transition-fast) !important;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="date"]:focus,
+select:focus,
+textarea:focus,
+.awsui-input-container input:focus {
+  outline: none !important;
+  border-color: var(--color-primary-main) !important;
+  box-shadow: 0 0 0 3px rgba(27, 90, 197, 0.1) !important;
+}
+
+/* ============================================================================
+   RESPONSIVE FIXES
+   ========================================================================== */
+
+/* Ensure consistent scaling at different zoom levels */
+@media (max-width: 1920px) {
+  :root {
+    --spacing-2xl: 24px;
+    --spacing-3xl: 32px;
+  }
+}
+
+@media (max-width: 1366px) {
+  :root {
+    --spacing-2xl: 20px;
+    --spacing-3xl: 24px;
+  }
+
+  .awsui-app-layout [data-testid="app-layout-sidebar"] {
+    width: 220px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  :root {
+    --spacing-xl: 12px;
+    --spacing-2xl: 16px;
+    --spacing-3xl: 20px;
+  }
+
+  .awsui-app-layout {
+    flex-direction: column !important;
+  }
+
+  .awsui-app-layout [data-testid="app-layout-sidebar"] {
+    width: 100% !important;
+    max-height: 60px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--sidebar-border) !important;
+  }
+
+  .awsui-app-layout [data-testid="app-layout-main"] {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --spacing-lg: 12px;
+    --spacing-xl: 12px;
+    --spacing-2xl: 12px;
+  }
+
+  .awsui-modal {
+    max-width: 95vw !important;
+    max-height: 95vh !important;
+  }
+}
+
+/* ============================================================================
+   PRINT STYLES
+   ========================================================================== */
+
+@media print {
+  .no-print,
+  .no-print * {
+    display: none !important;
+  }
+
+  body {
+    background-color: white !important;
+  }
+}
