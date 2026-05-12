@@ -36,13 +36,51 @@ SPECIALIST_ARN_MAP: Dict[str, str] = {
     "security":   os.getenv("SECURITY_A2A_ARN", ""),
     "cost":       os.getenv("COST_A2A_ARN", ""),
     "advisor":    os.getenv("ADVISOR_A2A_ARN", ""),
-    "jira":       os.getenv("JIRA_A2A_ARN", ""),
+    "youtrack":    os.getenv("YOUTRACK_A2A_ARN", ""),
     "knowledge":  os.getenv("KNOWLEDGE_A2A_ARN", ""),
 }
 
 # Module-level singleton
 _direct_router_instance: Optional["DirectRouterClient"] = None
 _direct_router_lock = threading.Lock()
+
+
+def _friendly_error_response(agent_key: str, error_msg: str) -> Dict[str, Any]:
+    """Map specialist/runtime failures to user-safe explanations."""
+    lower_msg = (error_msg or "").lower()
+
+    if "401" in lower_msg or "unauthorized" in lower_msg:
+        response = (
+            "I could not authenticate with YouTrack. The configured YouTrack permanent token "
+            "is invalid, expired, or missing the required permissions for this project."
+        )
+    elif "accessdenied" in lower_msg or "not authorized" in lower_msg or "access denied" in lower_msg:
+        response = (
+            "I could not access the requested AWS data. The MSP account or configured cross-account "
+            "role needs read-only permissions for this service."
+        )
+    elif "subscriptionrequired" in lower_msg or "business support" in lower_msg or "enterprise support" in lower_msg:
+        response = (
+            "Trusted Advisor data is not available with the current AWS support plan. "
+            "AWS Business or Enterprise Support is required for these recommendations."
+        )
+    elif "timed out" in lower_msg or "timeout" in lower_msg:
+        response = (
+            f"The {agent_key} specialist timed out while querying data. Please try again with a more specific request."
+        )
+    else:
+        response = (
+            f"The {agent_key} specialist could not complete this request. "
+            "Check runtime logs and service permissions, then try again."
+        )
+
+    return {
+        "response": response,
+        "agent_type": agent_key,
+        "session_id": "",
+        "direct_routed": True,
+        "error": True,
+    }
 
 
 def get_direct_router() -> "DirectRouterClient":
@@ -70,8 +108,11 @@ class DirectRouterClient:
     def __init__(self):
         region = os.getenv("AWS_REGION", "us-east-1")
         self.region = region
-        
-        # Reuse reduced timeout from agentcore_client.py
+
+        # Reduced timeout for faster failure detection and cost optimization
+        # read_timeout=180s (3min): Most A2A queries should complete in 60-120s
+        # 180s provides buffer for occasional latency spikes without waiting 10 minutes
+        # connect_timeout=10s: Network connection should establish quickly or fail
         client_config = Config(
             read_timeout=180,
             connect_timeout=10,
@@ -88,7 +129,7 @@ class DirectRouterClient:
 
         Args:
             agent_hint: Domain key — one of cloudwatch, security, cost, advisor,
-                        jira, knowledge.
+                        youtrack, knowledge.
 
         Returns:
             True if the corresponding env-var ARN was set at startup (non-empty
@@ -110,7 +151,7 @@ class DirectRouterClient:
         Invoke a specialist A2A runtime directly.
 
         Args:
-            agent_key: One of cloudwatch, security, cost, advisor, jira, knowledge
+            agent_key: One of cloudwatch, security, cost, advisor, youtrack, knowledge
             prompt: User's question (plain text, no metadata prefix needed here)
             account_name: Customer account name (or "default" for MSP account)
             region: AWS region
@@ -127,19 +168,19 @@ class DirectRouterClient:
         if not session_id:
             session_id = str(uuid.uuid4())
 
-        # Enrich prompt with Jira config when routing directly (supervisor path
+        # Enrich prompt with YouTrack config when routing directly (supervisor path
         # does this in supervisor_tools.py; direct path must do it here)
-        if agent_key == "jira":
-            jira_project_key = os.getenv("JIRA_PROJECT_KEY", "")
-            jira_domain = os.getenv("JIRA_DOMAIN", "")
-            jira_email = os.getenv("JIRA_EMAIL", "")
-            jira_ctx = (
-                f"\n\n[Jira Config — use these values, never ask the user]\n"
-                f"project_key: {jira_project_key}\n"
-                f"domain: {jira_domain}\n"
-                f"email: {jira_email}\n"
+        if agent_key == "youtrack":
+            youtrack_project_id = os.getenv("YOUTRACK_PROJECT_ID", "")
+            youtrack_project_name = os.getenv("YOUTRACK_PROJECT_NAME", "")
+            youtrack_url = os.getenv("YOUTRACK_URL", "")
+            youtrack_ctx = (
+                f"\n\n[YouTrack Config - use these values, never ask the user]\n"
+                f"project_id: {youtrack_project_id}\n"
+                f"project_name: {youtrack_project_name}\n"
+                f"base_url: {youtrack_url}\n"
             )
-            prompt = prompt + jira_ctx
+            prompt = prompt + youtrack_ctx
 
         # Prepend metadata JSON prefix — same pattern as a2a_client_helper.py
         # context_tools.py._extract_metadata_prompt() reads this to set account context
@@ -205,6 +246,11 @@ class DirectRouterClient:
             result_text = ""
             try:
                 data = json.loads(raw_text) if raw_text else {}
+                if "error" in data:
+                    error_msg = data["error"].get("message", "Unknown A2A error")
+                    logger.warning(f"DirectRouter: {agent_key} returned A2A error: {error_msg}")
+                    return _friendly_error_response(agent_key, error_msg)
+
                 if "result" in data:
                     result = data["result"]
 
@@ -246,8 +292,7 @@ class DirectRouterClient:
             error_code = e.response["Error"]["Code"]
             error_msg = e.response["Error"]["Message"]
             logger.error(f"DirectRouter: {agent_key} ClientError [{error_code}]: {error_msg}")
-            # Return None to trigger Supervisor fallback
-            return None
+            return _friendly_error_response(agent_key, f"{error_code}: {error_msg}")
         except Exception as e:
             logger.error(f"DirectRouter: {agent_key} unexpected error: {e}")
-            return None
+            return _friendly_error_response(agent_key, str(e))

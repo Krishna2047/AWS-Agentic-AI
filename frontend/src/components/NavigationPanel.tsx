@@ -38,6 +38,7 @@ import { AddAccountModal } from './AddAccountModal';
 import { DeleteAccountModal } from './DeleteAccountModal';
 import { HealthDashboard } from './HealthDashboard';
 import { ApprovalCards } from './ApprovalCards';
+import { ThemeToggle } from './ThemeToggle';
 import { apiClient } from '../services/api/apiClient';
 import type { Account } from '../types';
 
@@ -94,14 +95,23 @@ export function NavigationPanel() {
     }
   };
 
-  // Convert accounts to select options
-  const accountOptions: SelectProps.Options = (accounts ?? []).map(account => ({
-    label: account.type === 'customer' 
-      ? `${getStatusIcon(account.status)} ${account.name} (${account.account_id})`
-      : account.name,
-    value: account.id,
-    iconName: account.type === 'msp' ? 'settings' : 'user-profile'
-  }));
+  // Convert accounts to select options, adding consolidated option
+  const consolidatedOption: SelectProps.Option = {
+    label: 'All Accounts (Consolidated View)',
+    value: 'all',
+    iconName: 'menu'
+  };
+
+  const accountOptions: SelectProps.Options = [
+    consolidatedOption,
+    ...(accounts ?? []).map(account => ({
+      label: account.type === 'customer'
+        ? `${getStatusIcon(account.status)} ${account.name} (${account.account_id})`
+        : account.name,
+      value: account.id,
+      iconName: account.type === 'msp' ? 'settings' : 'user-profile'
+    }))
+  ];
 
   const currentOption = accountOptions.find(opt => opt.value === selectedAccount?.id) || accountOptions[0] || null;
 
@@ -176,10 +186,20 @@ export function NavigationPanel() {
   const customerAccounts = (accounts ?? []).filter(acc => acc.type === 'customer');
 
   return (
-    <SpaceBetween size="l">
+    <div className="sidebar-shell">
+      {/* Theme Toggle */}
+      <div className="sidebar-card" style={{ paddingBottom: '8px' }}>
+        <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+          <Box variant="p" fontWeight="bold">Theme</Box>
+          <ThemeToggle />
+        </SpaceBetween>
+      </div>
+
       {/* Account Section */}
+      <div className="sidebar-card sidebar-card--primary">
       <Container>
         <SpaceBetween size="m">
+          <div className="sidebar-caption">Workspace accounts</div>
           <Select
             selectedOption={currentOption}
             options={accountOptions}
@@ -215,6 +235,7 @@ export function NavigationPanel() {
           </SpaceBetween>
           {refreshError && <Alert type="warning" dismissible onDismiss={() => setRefreshError('')}>{refreshError}</Alert>}
           {selectedAccount && (
+            <div className="sidebar-meta">
             <Alert type="info">
               Currently using: {selectedAccount.name}
               {selectedAccount.type === 'customer' && (
@@ -226,9 +247,11 @@ export function NavigationPanel() {
                 </>
               )}
             </Alert>
+            </div>
           )}
         </SpaceBetween>
       </Container>
+      </div>
 
       {/* Workflow Mode with Approvals */}
       <SpaceBetween size="m">
@@ -243,6 +266,7 @@ export function NavigationPanel() {
       <HealthDashboard />
 
       {/* User Info & Actions */}
+      <div className="sidebar-card">
       <Container header={<Header variant="h3">User</Header>}>
         <SpaceBetween size="m">
           <Box variant="p">
@@ -257,6 +281,7 @@ export function NavigationPanel() {
           </Button>
         </SpaceBetween>
       </Container>
+      </div>
 
       {/* Clear Chat */}
       <Button 
@@ -282,6 +307,6 @@ export function NavigationPanel() {
         onDismiss={() => setShowDeleteAccountModal(false)}
         onAccountDeleted={handleAccountDeleted}
       />
-    </SpaceBetween>
+    </div>
   );
 }

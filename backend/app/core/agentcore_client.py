@@ -61,16 +61,16 @@ class AgentCoreClient:
     
     def __init__(self, region: str = "us-east-1"):
         self.region = region
-        
-        # read_timeout=600s (10min): Multi-specialist queries (health check, etc.) call 3+ agents
-        # sequentially. Each cold-starts at 60-120s. 3×120s = 360s worst case + gateway delay.
-        # 600s (10 minutes) provides safe buffer for all scenarios including cold-start chains.
+
+        # read_timeout=180s (3min): Direct-routed queries should complete in 60-120s.
+        # Parallelization of multi-agent queries (health dashboard) eliminates sequential wait.
+        # 180s accommodates single cold-start + processing; failing faster saves costs.
         client_config = Config(
-            read_timeout=600,      # 10 minutes for multi-specialist cold-start chains
+            read_timeout=180,      # 3 minutes for optimized direct routing
             connect_timeout=10,    # 10 seconds for connection
             retries={'max_attempts': 1}  # Don't retry long agent calls
         )
-        
+
         self.runtime_client = boto3.client('bedrock-agentcore', region_name=region, config=client_config)
         self.control_client = boto3.client('bedrock-agentcore-control', region_name=region, config=client_config)
     
