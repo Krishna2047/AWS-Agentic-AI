@@ -45,6 +45,13 @@ Dependencies:
   Exports self.api_url and self.cognito_config for FrontendStack.
 """
 import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import aws_cdk as cdk
+import jsii
 from constructs import Construct
 from aws_cdk import (
     Stack,
@@ -57,9 +64,65 @@ from aws_cdk import (
     aws_apigateway as apigw,
     aws_elasticloadbalancingv2 as elbv2,
     aws_dynamodb as dynamodb,
-    CfnOutput, Duration, RemovalPolicy
+    aws_lambda as _lambda,
+    aws_events as events,
+    aws_events_targets as targets,
+    aws_s3 as s3,
+    CfnOutput, Duration, RemovalPolicy, BundlingOptions
 )
 from aws_solutions_constructs.aws_alb_fargate import AlbToFargate
+
+
+@jsii.implements(cdk.ILocalBundling)
+class BillingReporterLocalBundler:
+    """Package the billing reporter Lambda without requiring Docker."""
+
+    def __init__(self, source_dir: str):
+        self.source_dir = Path(source_dir)
+
+    def try_bundle(
+        self,
+        output_dir,
+        *,
+        image,
+        entrypoint=None,
+        command=None,
+        volumes=None,
+        volumesFrom=None,
+        environment=None,
+        workingDirectory=None,
+        user=None,
+        local=None,
+        outputType=None,
+        securityOpt=None,
+        network=None,
+        bundlingFileAccess=None,
+        platform=None,
+    ) -> bool:
+        python_exec = shutil.which("python3") or shutil.which("python") or sys.executable
+        if not python_exec:
+            return False
+
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        requirements_file = self.source_dir / "requirements.txt"
+        if requirements_file.exists():
+            subprocess.run(
+                [python_exec, "-m", "pip", "install", "-r", str(requirements_file), "-t", str(output_path)],
+                check=True,
+            )
+
+        for item in self.source_dir.iterdir():
+            if item.name in {"__pycache__", ".pytest_cache"}:
+                continue
+            destination = output_path / item.name
+            if item.is_dir():
+                shutil.copytree(item, destination, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, destination)
+
+        return True
 
 class BackendStack(Stack):
     """
@@ -69,6 +132,28 @@ class BackendStack(Stack):
     
     def __init__(self, scope: Construct, id: str, agentcore_resources: dict, **kwargs):
         super().__init__(scope, id, **kwargs)
+
+        # Allow context overrides for runtime ARNs (for redeployment after A2A specialists are created)
+        # This enables deploy.sh Step 9.8 to update ECS env vars without redeploying AgentCoreStack
+        agentcore_resources = agentcore_resources.copy()  # Don't modify the original
+
+        supervisor_override = self.node.try_get_context("supervisor_runtime_arn")
+        if supervisor_override:
+            agentcore_resources['supervisor_runtime_arn'] = supervisor_override
+
+        # A2A ARN overrides (populated by deploy.sh Step 9)
+        a2a_overrides = {
+            'cloudwatch_a2a_arn': self.node.try_get_context("cloudwatch_a2a_arn"),
+            'security_a2a_arn': self.node.try_get_context("security_a2a_arn"),
+            'cost_a2a_arn': self.node.try_get_context("cost_a2a_arn"),
+            'advisor_a2a_arn': self.node.try_get_context("advisor_a2a_arn"),
+            'youtrack_a2a_arn': self.node.try_get_context("youtrack_a2a_arn"),
+            'knowledge_a2a_arn': self.node.try_get_context("knowledge_a2a_arn"),
+        }
+
+        for key, value in a2a_overrides.items():
+            if value:
+                agentcore_resources[key] = value
         
         # 1. ECR Repository for backend image
         # Import existing repository created by deploy.sh (not creating to avoid conflicts)
@@ -82,7 +167,7 @@ class BackendStack(Stack):
             table_name="msp-assistant-chat-requests",
             partition_key=dynamodb.Attribute(name="request_id", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,  # Serverless, scales to zero
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,  # Keep data on stack deletion (safer production)
             time_to_live_attribute="ttl",  # Auto-cleanup expired items after 10 minutes
         )
         
@@ -90,6 +175,9 @@ class BackendStack(Stack):
         task_role = iam.Role(self, "BackendTaskRole",
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             description="Role for ECS tasks to invoke AgentCore services"
+        )
+        task_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("ReadOnlyAccess")
         )
         
         # Grant DynamoDB access for async chat state
@@ -152,6 +240,37 @@ class BackendStack(Stack):
             resources=["*"]
         ))
 
+        task_role.add_to_policy(iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "support:DescribeTrustedAdvisorChecks",
+                "support:DescribeTrustedAdvisorCheckResult",
+                "support:DescribeTrustedAdvisorCheckSummaries",
+                "trustedadvisor:ListChecks",
+                "trustedadvisor:ListRecommendations",
+                "trustedadvisor:GetRecommendation",
+            ],
+            resources=["*"]
+        ))
+
+        # Cost Explorer (dashboard cost data)
+        task_role.add_to_policy(iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "ce:GetCostAndUsage",
+                "ce:GetCostForecast",
+                "ce:GetReservationUtilization",
+                "ce:GetSavingsPlansUtilization",
+                "ce:GetCostCategories",
+                "ce:GetDimensionValues",
+                "ce:GetRightsizingRecommendation",
+                "ce:GetSavingsPlansPurchaseRecommendation",
+                "ce:GetReservationPurchaseRecommendation",
+                "ce:GetAnomalies"
+            ],
+            resources=["*"]
+        ))
+
         # STS (cross-account assume role, caller identity)
         task_role.add_to_policy(iam.PolicyStatement(
             effect=iam.Effect.ALLOW,
@@ -172,6 +291,75 @@ class BackendStack(Stack):
             actions=["secretsmanager:ListSecrets"],
             resources=["*"]
         ))
+        billing_report_bucket_arn = f"arn:aws:s3:::msp-assistant-billing-reports-{self.account}-{self.region}"
+        task_role.add_to_policy(iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=["s3:GetObject", "s3:ListBucket"],
+            resources=[billing_report_bucket_arn, f"{billing_report_bucket_arn}/*"]
+        ))
+
+        # 3b. Automated billing workbook generation (S3 + Lambda + EventBridge)
+        billing_report_bucket = s3.Bucket(self, "BillingReportBucket",
+            bucket_name=f"msp-assistant-billing-reports-{self.account}-{self.region}",
+            versioned=True,
+            removal_policy=RemovalPolicy.RETAIN,
+            auto_delete_objects=False,
+            enforce_ssl=True
+        )
+
+        lambda_source = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "backend", "billing_reporter")
+        )
+
+        billing_report_fn = _lambda.Function(self, "BillingReportGenerator",
+            runtime=_lambda.Runtime.PYTHON_3_11,
+            handler="handler.handler",
+            timeout=Duration.minutes(15),
+            memory_size=1024,
+            code=_lambda.Code.from_asset(
+                lambda_source,
+                bundling=BundlingOptions(
+                    local=BillingReporterLocalBundler(lambda_source),
+                    image=_lambda.Runtime.PYTHON_3_11.bundling_image,
+                    command=[
+                        "bash", "-lc",
+                        "pip install -r requirements.txt -t /asset-output && cp -au . /asset-output"
+                    ]
+                )
+            ),
+            environment={
+                "REPORT_BUCKET": billing_report_bucket.bucket_name,
+                "REPORT_KEY": "billing/aws-billing-tracker.xlsx",
+                "REPORT_REGION": self.region,
+                "SCHEDULE_TIMEZONE": "Asia/Kolkata",
+            }
+        )
+
+        billing_report_bucket.grant_read_write(billing_report_fn)
+        billing_report_fn.add_to_role_policy(iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "ce:GetCostAndUsage",
+                "ce:GetCostForecast",
+                "sts:GetCallerIdentity",
+                "sts:AssumeRole",
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:ListSecrets",
+            ],
+            resources=["*"]
+        ))
+
+        events.Rule(self, "BillingReportSchedule",
+            description="Runs the AWS billing workbook generator daily at 6:00 PM IST",
+            schedule=events.Schedule.cron(
+                minute="30",
+                hour="12",
+                month="*",
+                week_day="*",
+                year="*"
+            ),
+            targets=[targets.LambdaFunction(billing_report_fn)]
+        )
         
         # 4. Cognito User Pool (create before ECS so we can pass IDs to container)
         user_pool = cognito.UserPool(self, "UserPool",
@@ -242,7 +430,10 @@ class BackendStack(Stack):
                 environment={
                     # AWS Configuration
                     "AWS_REGION": self.region,
-                    
+
+                    # Redis Configuration (for caching)
+                    "REDIS_URL": cdk.Fn.import_value("RedisConnectionString"),
+
                     # Cognito Configuration (required by backend)
                     "COGNITO_USER_POOL_ID": user_pool.user_pool_id,
                     "COGNITO_CLIENT_ID": user_pool_client.user_pool_client_id,
@@ -255,22 +446,23 @@ class BackendStack(Stack):
                     
                     # DynamoDB for async chat state
                     "CHAT_REQUESTS_TABLE": chat_table.table_name,
+                    "BILLING_REPORT_BUCKET": billing_report_bucket.bucket_name,
+                    "BILLING_REPORT_KEY": "billing/aws-billing-tracker.xlsx",
                     
                     # Bedrock Configuration (for Runtime agents)
-                    "MODEL": os.getenv('MODEL', 'global.anthropic.claude-sonnet-4-20250514-v1:0'),
+                    "MODEL": os.getenv('MODEL', 'anthropic.claude-3-5-sonnet-20240620-v1:0'),
                     "BEDROCK_KNOWLEDGE_BASE_ID": os.getenv('BEDROCK_KNOWLEDGE_BASE_ID', ''),
                     
                     # Agent Prompts (for Runtime agents) - multi-line strings from config_loader.py
                     "CLOUDWATCH_PROMPT": os.getenv('CLOUDWATCH_PROMPT', 'You are an expert AWS CloudWatch assistant.'),
-                    "JIRA_PROMPT": os.getenv('JIRA_PROMPT', 'You are an expert Jira assistant.'),
+                    "YOUTRACK_PROMPT": os.getenv('YOUTRACK_PROMPT', 'You are an expert YouTrack assistant.'),
                     "KNOWLEDGEBASE_PROMPT": os.getenv('KNOWLEDGEBASE_PROMPT', 'You are a fast API Gateway troubleshooting specialist.'),
                     
-                    # Jira Configuration (for Runtime agents)
-                    "JIRA_URL": os.getenv('JIRA_DOMAIN', ''),
-                    "JIRA_DOMAIN": os.getenv('JIRA_DOMAIN', ''),
-                    "JIRA_EMAIL": os.getenv('JIRA_EMAIL', ''),
-                    "JIRA_API_TOKEN": os.getenv('JIRA_API_TOKEN', ''),
-                    "JIRA_PROJECT_KEY": os.getenv('JIRA_PROJECT_KEY', ''),
+                    # YouTrack Configuration (for Runtime agents)
+                    "YOUTRACK_URL": os.getenv('YOUTRACK_URL', ''),
+                    "YOUTRACK_TOKEN": os.getenv('YOUTRACK_TOKEN', os.getenv('YOUTRACK_API_TOKEN', '')),
+                    "YOUTRACK_PROJECT_ID": os.getenv('YOUTRACK_PROJECT_ID', ''),
+                    "YOUTRACK_PROJECT_NAME": os.getenv('YOUTRACK_PROJECT_NAME', ''),
                     
                     # A2A Specialist Runtime ARNs for direct routing (bypasses Supervisor LLM hop)
                     # Populated by deploy.sh Step 9 via agentcore_resources dict
@@ -278,7 +470,7 @@ class BackendStack(Stack):
                     "SECURITY_A2A_ARN": agentcore_resources.get('security_a2a_arn', ''),
                     "COST_A2A_ARN": agentcore_resources.get('cost_a2a_arn', ''),
                     "ADVISOR_A2A_ARN": agentcore_resources.get('advisor_a2a_arn', ''),
-                    "JIRA_A2A_ARN": agentcore_resources.get('jira_a2a_arn', ''),
+                    "YOUTRACK_A2A_ARN": agentcore_resources.get('youtrack_a2a_arn', ''),
                     "KNOWLEDGE_A2A_ARN": agentcore_resources.get('knowledge_a2a_arn', ''),
                 },
                 logging=ecs.LogDrivers.aws_logs(
@@ -308,12 +500,14 @@ class BackendStack(Stack):
                 "protocol": elbv2.ApplicationProtocol.HTTP
             },
             target_group_props={
+                "protocol": elbv2.ApplicationProtocol.HTTP,  # Internal communication
                 "health_check": elbv2.HealthCheck(
                     path="/health",
                     interval=Duration.seconds(30),
                     timeout=Duration.seconds(10),
                     healthy_threshold_count=2,
-                    unhealthy_threshold_count=3
+                    unhealthy_threshold_count=3,
+                    protocol=elbv2.Protocol.HTTP
                 ),
                 "deregistration_delay": Duration.seconds(30)
             }
@@ -358,9 +552,10 @@ class BackendStack(Stack):
             deploy_options=apigw.StageOptions(
                 stage_name="prod",
                 throttling_rate_limit=100,
-                throttling_burst_limit=200,
-                logging_level=apigw.MethodLoggingLevel.INFO,
-                metrics_enabled=True
+                throttling_burst_limit=200
+                # Temporarily disable logging to avoid CloudWatch role requirement
+                # logging_level=apigw.MethodLoggingLevel.INFO,
+                # metrics_enabled=True
             )
         )
         
@@ -547,6 +742,13 @@ class BackendStack(Stack):
             response_headers=cors_headers
         )
         
+        # Export VPC and security group for Redis stack
+        self.vpc = alb_fargate.vpc
+        self.backend_security_group = alb_fargate.service.task_definition.task_role
+        # Note: For Redis, we need the security group of the ECS tasks, not the role
+        # Get it from the ECS service
+        self.backend_task_security_group = alb_fargate.service.connections.security_groups[0] if alb_fargate.service.connections.security_groups else None
+
         # Outputs
         self.api_url = api.url
         self.cognito_config = {
@@ -566,3 +768,6 @@ class BackendStack(Stack):
         CfnOutput(self, "ECSClusterName", value=alb_fargate.service.cluster.cluster_name)
         CfnOutput(self, "ECSServiceName", value=alb_fargate.service.service_name)
         CfnOutput(self, "ChatRequestsTableName", value=chat_table.table_name)
+        CfnOutput(self, "BillingReportBucketName", value=billing_report_bucket.bucket_name)
+        CfnOutput(self, "BillingReportWorkbookKey", value="billing/aws-billing-tracker.xlsx")
+        CfnOutput(self, "BillingReportLambdaName", value=billing_report_fn.function_name)

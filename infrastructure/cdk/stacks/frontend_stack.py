@@ -64,9 +64,9 @@ class FrontendStack(Stack):
         # We will override the response headers policy after creation
         cloudfront_s3 = CloudFrontToS3(self, "Frontend",
             bucket_props=s3.BucketProps(
-                removal_policy=RemovalPolicy.DESTROY,
-                auto_delete_objects=True,
-                versioned=False
+                removal_policy=RemovalPolicy.RETAIN,  # Keep S3 bucket on stack deletion (safer)
+                auto_delete_objects=False,  # Don't auto-delete objects for safety
+                versioned=True  # Enable versioning for rollback capability
             ),
             insert_http_security_headers=False  # Disable default security headers
         )
