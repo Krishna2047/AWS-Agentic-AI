@@ -3044,3 +3044,229 @@ def _estimate_service_costs_by_names(service_names: List[str], region: str) -> D
     """
     return _estimate_service_costs(service_names)
 
+
+@router.post("/monitoring/start")
+async def start_monitoring(
+    user=Depends(get_current_user),
+    check_interval_minutes: int = Query(15),
+    cost_spike_threshold: float = Query(20.0),
+):
+    """
+    Start continuous monitoring service for cost spikes, alarms, and security findings.
+    Monitoring runs in background with configurable intervals.
+    """
+    try:
+        from app.services.monitoring_service import get_continuous_monitor
+
+        account_service = get_account_service()
+        account_names = [acc["account_id"] for acc in account_service.list_accounts()]
+
+        if not account_names:
+            raise HTTPException(
+                status_code=400,
+                detail="No AWS accounts configured for monitoring"
+            )
+
+        monitor = get_continuous_monitor(
+            account_names=account_names,
+            check_interval_minutes=check_interval_minutes,
+            cost_spike_threshold=cost_spike_threshold,
+        )
+
+        if not monitor.is_running:
+            asyncio.create_task(monitor.start())
+            return {
+                "success": True,
+                "message": "Continuous monitoring started",
+                "config": {
+                    "check_interval_minutes": check_interval_minutes,
+                    "cost_spike_threshold": cost_spike_threshold,
+                    "monitored_accounts": len(account_names),
+                }
+            }
+        else:
+            return {
+                "success": True,
+                "message": "Continuous monitoring already running",
+                "config": {
+                    "check_interval_minutes": check_interval_minutes,
+                    "cost_spike_threshold": cost_spike_threshold,
+                    "monitored_accounts": len(account_names),
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error starting monitoring: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/monitoring/stop")
+async def stop_monitoring(user=Depends(get_current_user)):
+    """
+    Stop the continuous monitoring service.
+    """
+    try:
+        from app.services.monitoring_service import _monitoring_instance
+
+        if _monitoring_instance and _monitoring_instance.is_running:
+            await _monitoring_instance.stop()
+            return {
+                "success": True,
+                "message": "Continuous monitoring stopped"
+            }
+        else:
+            return {
+                "success": True,
+                "message": "Monitoring was not running"
+            }
+    except Exception as e:
+        logger.error(f"Error stopping monitoring: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/monitoring/alerts")
+async def get_pending_alerts(user=Depends(get_current_user)):
+    """
+    Retrieve pending alerts from the monitoring service.
+    Alerts are removed from the queue after retrieval.
+    """
+    try:
+        from app.services.monitoring_service import _monitoring_instance
+
+        if _monitoring_instance is None:
+            return {
+                "success": True,
+                "alerts": [],
+                "count": 0,
+                "message": "Monitoring not started yet"
+            }
+
+        alerts = _monitoring_instance.get_pending_alerts()
+        return {
+            "success": True,
+            "alerts": [alert.to_dict() for alert in alerts],
+            "count": len(alerts),
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving alerts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/monitoring/send-test-alert")
+async def send_test_alert(
+    user=Depends(get_current_user),
+    channel: str = Query("TEAMS"),
+):
+    """
+    Send a test notification to verify webhook configuration.
+    Useful for testing Microsoft Teams, Slack, and other integrations.
+    """
+    try:
+        from app.services.notification_service import (
+            get_notification_service,
+            NotificationChannel,
+        )
+
+        notification_service = get_notification_service()
+
+        title = "Test Alert from AWS MSP Smart Agent"
+        message = (
+            "This is a test notification to verify your webhook configuration.\n\n"
+            "If you received this message, your integration is working correctly! ✅"
+        )
+        alert_data = {
+            "severity": "INFO",
+            "alert_type": "TEST",
+            "account_id": "test",
+            "resource_id": "test-resource",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        try:
+            channel_enum = NotificationChannel[channel.upper()]
+            results = await notification_service.notify(
+                title, message, alert_data, channels=[channel_enum]
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown notification channel: {channel}"
+            )
+
+        return {
+            "success": True,
+            "message": f"Test alert sent to {channel}",
+            "results": {ch.value: success for ch, success in results.items()},
+        }
+    except Exception as e:
+        logger.error(f"Error sending test alert: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/monitoring/configure-notification")
+async def configure_notification(
+    user=Depends(get_current_user),
+    channel: str = Query("TEAMS"),
+    webhook_url: str = Query(...),
+):
+    """
+    Configure notification webhook URL for a specific channel.
+    This endpoint updates environment variables for the notification service.
+    """
+    try:
+        if channel.upper() == "TEAMS":
+            os.environ["TEAMS_WEBHOOK_URL"] = webhook_url
+            logger.info("Teams webhook URL configured")
+        elif channel.upper() == "SLACK":
+            os.environ["SLACK_WEBHOOK_URL"] = webhook_url
+            logger.info("Slack webhook URL configured")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported notification channel: {channel}"
+            )
+
+        from app.services.notification_service import _notification_service
+        if _notification_service:
+            _notification_service._initialize_handlers()
+
+        return {
+            "success": True,
+            "message": f"{channel} webhook URL configured successfully",
+            "channel": channel,
+        }
+    except Exception as e:
+        logger.error(f"Error configuring notification: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/monitoring/status")
+async def get_monitoring_status(user=Depends(get_current_user)):
+    """
+    Get current status of the continuous monitoring service.
+    """
+    try:
+        from app.services.monitoring_service import _monitoring_instance
+
+        if _monitoring_instance is None:
+            return {
+                "success": True,
+                "status": "not_initialized",
+                "is_running": False,
+                "message": "Monitoring service not yet started",
+            }
+
+        return {
+            "success": True,
+            "status": "running" if _monitoring_instance.is_running else "stopped",
+            "is_running": _monitoring_instance.is_running,
+            "configuration": {
+                "check_interval_minutes": _monitoring_instance.check_interval_minutes,
+                "cost_spike_threshold": _monitoring_instance.cost_spike_threshold,
+                "monitored_accounts": len(_monitoring_instance.account_names),
+            },
+            "alerts_pending": len(_monitoring_instance.alerts_queue),
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving monitoring status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

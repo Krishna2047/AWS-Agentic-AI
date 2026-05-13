@@ -30,11 +30,11 @@ class Settings(BaseSettings):
     AWS_PROFILE: Optional[str] = None
     BEDROCK_KNOWLEDGE_BASE_ID: Optional[str] = ""
     
-    # Jira Configuration
-    JIRA_URL: Optional[str] = ""
-    JIRA_EMAIL: Optional[str] = ""
-    JIRA_API_TOKEN: Optional[str] = ""
-    JIRA_PROJECT_KEY: Optional[str] = ""
+    # YouTrack Configuration
+    YOUTRACK_URL: Optional[str] = ""
+    YOUTRACK_TOKEN: Optional[str] = ""
+    YOUTRACK_PROJECT_ID: Optional[str] = ""
+    YOUTRACK_PROJECT_NAME: Optional[str] = ""
     UNRESOLVED_TICKET_EMAIL: Optional[str] = ""
     
     # Demo/Test Configuration
@@ -53,9 +53,19 @@ class Settings(BaseSettings):
     SECURITY_A2A_ARN: Optional[str] = ""
     COST_A2A_ARN: Optional[str] = ""
     ADVISOR_A2A_ARN: Optional[str] = ""
-    JIRA_A2A_ARN: Optional[str] = ""
+    YOUTRACK_A2A_ARN: Optional[str] = ""
     KNOWLEDGE_A2A_ARN: Optional[str] = ""
-    
+
+    # Continuous Monitoring Configuration
+    MONITORING_ENABLED: bool = False
+    MONITORING_CHECK_INTERVAL_MINUTES: int = 15
+    MONITORING_COST_SPIKE_THRESHOLD: float = 20.0
+
+    # Notification Configuration
+    TEAMS_WEBHOOK_URL: Optional[str] = ""
+    SLACK_WEBHOOK_URL: Optional[str] = ""
+    DASHBOARD_URL: str = "http://localhost:3000"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
