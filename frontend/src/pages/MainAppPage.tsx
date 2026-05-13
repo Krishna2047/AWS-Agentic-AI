@@ -16,6 +16,8 @@ import { MessageDisplay, StreamingIndicator } from '../components/MessageDisplay
 import { NavigationPanel } from '../components/NavigationPanel';
 import WorkflowPanel from '../components/WorkflowPanel';
 import DashboardPage from './DashboardPage';
+import PricingCalculatorPage from './PricingCalculatorPage';
+import { MonitoringDashboard } from '../components/MonitoringDashboard';
 import type { ChatMessage, SSEProgressEvent } from '../types';
 
 let stepCounter = 0;
@@ -402,6 +404,16 @@ function MainAppPage() {
                       label: 'Dashboard',
                       id: 'dashboard',
                       content: <DashboardPage />,
+                    },
+                    {
+                      label: 'Continuous Monitoring',
+                      id: 'monitoring',
+                      content: <MonitoringDashboard />,
+                    },
+                    {
+                      label: 'Pricing Calculator',
+                      id: 'pricing',
+                      content: <PricingCalculatorPage />,
                     },
                   ]}
                 />
